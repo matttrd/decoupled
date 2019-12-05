@@ -1,0 +1,3 @@
+[submodule "exp_library"]
+	path = exp_library
+	url = git@github.com:matttrd/exp_library.git
