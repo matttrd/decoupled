@@ -42,7 +42,7 @@ def main(args, store=None):
     train_loader, val_loader = dataset.make_loaders(args.workers,
                     args.batch_size, data_aug=bool(args.data_aug))
 
-    inner_batch_factor = 4 if args.dataset == 'cifar' else 4
+    inner_batch_factor = 4 if args.dataset == 'cifar' else 2
     class_loader, _ = dataset.make_loaders(args.workers,
                     args.batch_size * inner_batch_factor, data_aug=bool(args.data_aug))
 
