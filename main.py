@@ -23,9 +23,11 @@ parser = defaults.add_args_to_parser(defaults.PGD_ARGS, parser)
 # parser = defaults.add_args_to_parser([['weight_decay_cl', float, 'weight decay classifier', 0.0001]], parser)
 # parser = defaults.add_args_to_parser([['lr_cl', float, 'learning rate of the classifier', 0.0001]], parser)
 extra_args = [
-['weight_decay_cl', float, 'weight decay classifier', 0.0001],
-['lr_cl', float, 'learning rate of the classifier', 0.0001]
-]
+['weight-decay-cl', float, 'weight decay classifier', 0.0001],
+['lr-cl', float, 'learning rate of the classifier', 0.0001],
+['cifar-imb', float, 'imbalance factor for cifar', -1],
+             ]
+
 
 parser = defaults.add_args_to_parser(extra_args, parser)
 
@@ -39,10 +41,19 @@ def main(args, store=None):
     data_path = os.path.expandvars(args.data)
     dataset = DATASETS[args.dataset](data_path)
 
+    subset = None
+    if args.dataset == 'cifar' and args.cifar_imb > 0:
+        from custom_fuctions import get_imb_subset
+        from torchvision.datasets import CIFAR10
+        targets = CIFAR10(data_path).targets
+        subset = get_imb_subset(targets, args.cifar_imb)
+    
     train_loader, val_loader = dataset.make_loaders(args.workers,
-                    args.batch_size, data_aug=bool(args.data_aug))
+                    args.batch_size, data_aug=bool(args.data_aug), subset=subset)
 
-    inner_batch_factor = 4 if args.dataset == 'cifar' else 2
+    inner_batch_factor = 8 if args.dataset == 'cifar' else 8
+    args.inner_batch_factor = inner_batch_factor
+    
     class_loader, _ = dataset.make_loaders(args.workers,
                     args.batch_size * inner_batch_factor, data_aug=bool(args.data_aug))
 
