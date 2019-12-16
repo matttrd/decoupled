@@ -7,12 +7,22 @@ import cox
 import cox.utils
 import cox.store
 
-from exp_library.model_utils import make_and_restore_model
+from exp_library.model_utils import make_and_restore_model, \
+								check_experiment_status, \
+								model_dataset_from_store
 from exp_library.datasets import DATASETS
 from exp_library.decoupled_train import train_model, eval_model
 from exp_library.tools import constants, helpers
 from exp_library import defaults, __version__
 from exp_library.defaults import check_and_fill_args
+from exp_library.loaders import DuplicateLoader
+
+from torch.nn.utils import parameters_to_vector as flatten
+def log_norm(mod, log_info):
+    curr_params = flatten(mod.parameters())
+    log_info_custom = { 'epoch': log_info['epoch'],
+                        'weight_norm': ch.norm(curr_params).detach().cpu().numpy() }
+    store['custom'].append_row(log_info_custom)
 
 
 parser = ArgumentParser()
@@ -32,7 +42,7 @@ extra_args = [
 parser = defaults.add_args_to_parser(extra_args, parser)
 
 
-def main(args, store=None):
+def main(args, model=None, checkpoint=None, store=None):
     '''Given arguments from `setup_args` and a store from `setup_store`,
     trains as a model. Check out the argparse object in this file for
     argument options.
@@ -50,8 +60,10 @@ def main(args, store=None):
     
     train_loader, val_loader = dataset.make_loaders(args.workers,
                     args.batch_size, data_aug=bool(args.data_aug), subset=subset)
+    # args.duplicates = 3
+    # train_loader = DuplicateLoader(train_loader, args.duplicates)
 
-    inner_batch_factor = 8 if args.dataset == 'cifar' else 8
+    inner_batch_factor = 2# if args.dataset == 'cifar' else 2
     args.inner_batch_factor = inner_batch_factor
     
     class_loader, _ = dataset.make_loaders(args.workers,
@@ -61,7 +73,7 @@ def main(args, store=None):
     val_loader = helpers.DataPrefetcher(val_loader)
     class_loader = helpers.DataPrefetcher(class_loader)
     loaders = (train_loader, class_loader, val_loader)
-
+    # loaders = (train_loader, val_loader)
     # MAKE MODEL
     model, checkpoint = make_and_restore_model(arch=args.arch,
             dataset=dataset, resume_path=args.resume)
@@ -77,6 +89,11 @@ def main(args, store=None):
     feats_net_pars+= list(root_model.layer2.parameters())
     feats_net_pars+= list(root_model.layer3.parameters())
     feats_net_pars+= list(root_model.layer4.parameters())
+    
+    # custom logs
+    CUSTOM_SCHEMA = {'epoch': int, 'weight_norm': float }
+    store.add_table('custom', CUSTOM_SCHEMA)
+    args.epoch_hook = log_norm
     
     # give to the main optim only the data_net
     model = train_model(args, model, loaders, store=store, update_params=feats_net_pars)
@@ -133,8 +150,18 @@ def setup_store_with_metadata(args):
 if __name__ == "__main__":
     args = parser.parse_args()
     args = cox.utils.Parameters(args.__dict__)
-
-    args = setup_args(args)
-    store = setup_store_with_metadata(args)
-
-    final_model = main(args, store=store)
+    #first check whether exp_id already exists
+    is_training = False
+    exp_dir_path = os.path.join(args.out_dir, args.exp_name)
+    if os.path.exists(exp_dir_path):
+        is_training = check_experiment_status(args.out_dir, args.exp_name)
+        
+        if is_training and (not args.resume or args.eval_only):
+            s = cox.store.Store(args.out_dir, args.exp_name)
+            model, checkpoint, _, store, args = model_dataset_from_store(s, 
+                    overwrite_params={}, which='last', mode='a', parallel=True)
+            final_model = main(args, model=model, checkpoint=checkpoint, store=store)
+    else:
+        args = setup_args(args)
+        store = setup_store_with_metadata(args)
+        final_model = main(args, store=store)
