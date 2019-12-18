@@ -8,8 +8,8 @@ import cox.utils
 import cox.store
 
 from exp_library.model_utils import make_and_restore_model, \
-								check_experiment_status, \
-								model_dataset_from_store
+                                check_experiment_status, \
+                                model_dataset_from_store
 from exp_library.datasets import DATASETS
 from exp_library.decoupled_train import train_model, eval_model
 from exp_library.tools import constants, helpers
@@ -36,6 +36,7 @@ extra_args = [
 ['weight-decay-cl', float, 'weight decay classifier', 0.0001],
 ['lr-cl', float, 'learning rate of the classifier', 0.0001],
 ['cifar-imb', float, 'imbalance factor for cifar', -1],
+['entr-reg', [0, 1], 'penalize entropic outputs', 0],
              ]
 
 
@@ -52,11 +53,17 @@ def main(args, model=None, checkpoint=None, store=None):
     dataset = DATASETS[args.dataset](data_path)
 
     subset = None
-    if args.dataset == 'cifar' and args.cifar_imb > 0:
+    if 'cifar' in args.dataset and args.cifar_imb > 0:
         from custom_fuctions import get_imb_subset
-        from torchvision.datasets import CIFAR10
-        targets = CIFAR10(data_path).targets
-        subset = get_imb_subset(targets, args.cifar_imb)
+        if args.dataset == 'cifar':
+            from torchvision.datasets import CIFAR10
+            targets = CIFAR10(data_path).targets
+            subset = get_imb_subset(targets, args.cifar_imb, 'cifar10')
+        else:
+            from torchvision.datasets import CIFAR100
+            targets = CIFAR100(data_path).targets
+            subset = get_imb_subset(targets, args.cifar_imb, 'cifar100')
+
     
     train_loader, val_loader = dataset.make_loaders(args.workers,
                     args.batch_size, data_aug=bool(args.data_aug), subset=subset)
@@ -80,6 +87,15 @@ def main(args, model=None, checkpoint=None, store=None):
     if 'module' in dir(model): model = model.module
 
     print(args)
+
+    # check for entr reg
+    if args.entr_reg:
+        def reg_loss(model, inp, targ):
+            out, _ = model(inp)
+            prob = ch.softmax(out, dim=1)
+            return -(ch.log(prob) * prob).sum(dim=1).mean()
+        args.regularizer = reg_loss
+
     if args.eval_only:
         return eval_model(args, model, val_loader, store=store)
 

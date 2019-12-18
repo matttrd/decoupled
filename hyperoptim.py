@@ -22,14 +22,19 @@ else:
     gs = json.loads(opt['gpus'])
 
 running = [None for g in gs]
+current_g = [None for g in gs]
 
 def runner():
-    def helper(idx):
+    def helper(idx, g=None):
         if not len(cmds):
             return
         c = cmds.pop()
+        if g is None:
+            g = gs[len(cmds)%len(gs)]
+        c = 'CUDA_VISIBLE_DEVICES=%d '%(g) + c
         p = subprocess.Popen(c, shell=True)
         running[idx] = p
+        current_g[idx] = g
         print('[Launch] ', p, c)
 
     while True:
@@ -41,7 +46,7 @@ def runner():
                     else:
                         print('[Cleanup] ', p, p.returncode)
                         running[idx] = None
-                        helper(idx)
+                        helper(idx, current_g[idx])
                 else:
                     helper(idx)
 
@@ -80,9 +85,8 @@ for v in product(*values):
             s += ' -'+k+' '+str(p[k])
 
     c = cmd+s#+' -l'
-    if not opt['dist']:
+    # if not opt['dist']:
         # c = c + (' -g %d')%(gs[len(cmds)%len(gs)])
-        c = 'CUDA_VISIBLE_DEVICES=%d '%(gs[len(cmds)%len(gs)]) + c
     exp_name = []
     for n in exp_keys:
         exp_name.append(str(p[n]))
