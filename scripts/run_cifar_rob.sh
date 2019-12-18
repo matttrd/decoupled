@@ -1,0 +1,1 @@
+python hyperoptim.py -c "python main.py --dataset cifar --data /home/matteo/data/ --adv-train 0 --out-dir results/cifar-rob/ --lr-cl 1e-5 --entr-reg 1" -p '{"arch":["resnet18"],"weight-decay-cl":[120.0,150]}' -j 3 --exp_keys '["arch","weight-decay-cl"]' -r
