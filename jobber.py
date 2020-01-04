@@ -23,7 +23,7 @@ running = [None for g in gs]
 current_g = [None for g in gs]
 
 def runner():
-    def helper(idx), g=None:
+    def helper(idx, g=None):
         if not len(cmds):
             return
         c = cmds.pop()

@@ -16,8 +16,13 @@ from exp_library.tools import constants, helpers
 from exp_library import defaults, __version__
 from exp_library.defaults import check_and_fill_args
 from exp_library.loaders import DuplicateLoader
-
+from exp_library.pytorch_modelsize import SizeEstimator
 from torch.nn.utils import parameters_to_vector as flatten
+import torch.multiprocessing as mp
+import torch.utils.data.distributed
+import torch.distributed as dist
+
+
 def log_norm(mod, log_info):
     curr_params = flatten(mod.parameters())
     log_info_custom = { 'epoch': log_info['epoch'],
@@ -37,17 +42,67 @@ extra_args = [
 ['lr-cl', float, 'learning rate of the classifier', 0.0001],
 ['cifar-imb', float, 'imbalance factor for cifar', -1],
 ['entr-reg', [0, 1], 'penalize entropic outputs', 0],
+['inner-batch-factor', int, 'inner batch factor', 2]
              ]
-
 
 parser = defaults.add_args_to_parser(extra_args, parser)
 
 
-def main(args, model=None, checkpoint=None, store=None):
+def main():
+    args = parser.parse_args()
+
+    #first check whether exp_id already exists
+    is_training = False
+    checkpoint = None
+    model = None
+    exp_dir_path = os.path.join(args.out_dir, args.exp_name) if  args.exp_name else None
+    if os.path.exists(exp_dir_path):
+        is_training = check_experiment_status(args.out_dir, args.exp_name)
+        
+        if is_training and (not args.resume or args.eval_only):
+            s = cox.store.Store(args.out_dir, args.exp_name)
+            model, checkpoint, _, store, args = model_dataset_from_store(s, 
+                    overwrite_params={}, which='last', mode='a', parallel=True)
+    else:
+        args = setup_args(args)
+        store = setup_store_with_metadata(args)
+    
+    if args.dist_url == "env://" and args.world_size == -1:
+        args.world_size = int(os.environ["WORLD_SIZE"])
+
+    args.distributed = args.world_size > 1 or args.multiprocessing_distributed
+    args.ngpus_per_node = ch.cuda.device_count()
+
+    if args.multiprocessing_distributed:
+        # Since we have ngpus_per_node processes per node, the total world_size
+        # needs to be adjusted accordingly
+        args.world_size = args.ngpus_per_node * args.world_size
+        # Use torch.multiprocessing.spawn to launch distributed processes: the
+        # main_worker process function
+        #mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args.params,model,checkpoint,store))
+        mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args, model, checkpoint, store.path))
+    else:
+        # Simply call main_worker function
+        final_model = main_worker(None, args, model=model, checkpoint=checkpoint, store=store)
+
+
+def main_worker(gpu, args, model, checkpoint, store):
     '''Given arguments from `setup_args` and a store from `setup_store`,
     trains as a model. Check out the argparse object in this file for
     argument options.
     '''
+    if args.distributed:
+        if args.dist_url == "env://" and args.rank == -1:
+            args.rank = int(os.environ["RANK"])
+        if args.multiprocessing_distributed:
+            # For multiprocessing distributed training, rank needs to be the
+            # global rank among all the processes
+            args.rank = args.rank * args.ngpus_per_node + gpu
+        dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+                                world_size=args.world_size, rank=args.rank)
+
+    args = cox.utils.Parameters(args.__dict__)
+    
     # MAKE DATASET AND LOADERS
     data_path = os.path.expandvars(args.data)
     dataset = DATASETS[args.dataset](data_path)
@@ -64,17 +119,21 @@ def main(args, model=None, checkpoint=None, store=None):
             targets = CIFAR100(data_path).targets
             subset = get_imb_subset(targets, args.cifar_imb, 'cifar100')
 
-    
-    train_loader, val_loader = dataset.make_loaders(args.workers,
-                    args.batch_size, data_aug=bool(args.data_aug), subset=subset)
+    train_loader, val_loader, train_sampler = dataset.make_loaders(args.workers,
+                    args.batch_size, data_aug=bool(args.data_aug), 
+                    subset=subset, distributed=args.distributed)
+
+    args.train_sampler = train_sampler
     # args.duplicates = 3
     # train_loader = DuplicateLoader(train_loader, args.duplicates)
 
-    inner_batch_factor = 2# if args.dataset == 'cifar' else 2
-    args.inner_batch_factor = inner_batch_factor
+    #inner_batch_factor = 2# if args.dataset == 'cifar' else 2
+    #args.inner_batch_factor = inner_batch_factor
     
-    class_loader, _ = dataset.make_loaders(args.workers,
-                    args.batch_size * inner_batch_factor, data_aug=bool(args.data_aug))
+    class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
+                    args.batch_size * args.inner_batch_factor,
+                    data_aug=bool(args.data_aug), distributed=args.distributed)
+    args.class_sampler = class_sampler
 
     train_loader = helpers.DataPrefetcher(train_loader)
     val_loader = helpers.DataPrefetcher(val_loader)
@@ -82,11 +141,10 @@ def main(args, model=None, checkpoint=None, store=None):
     loaders = (train_loader, class_loader, val_loader)
     # loaders = (train_loader, val_loader)
     # MAKE MODEL
-    model, checkpoint = make_and_restore_model(arch=args.arch,
-            dataset=dataset, resume_path=args.resume)
+    model, checkpoint = make_and_restore_model(args, dataset=dataset)
     if 'module' in dir(model): model = model.module
 
-    print(args)
+    #print(args)
 
     # check for entr reg
     if args.entr_reg:
@@ -105,11 +163,6 @@ def main(args, model=None, checkpoint=None, store=None):
     feats_net_pars+= list(root_model.layer2.parameters())
     feats_net_pars+= list(root_model.layer3.parameters())
     feats_net_pars+= list(root_model.layer4.parameters())
-    
-    # custom logs
-    CUSTOM_SCHEMA = {'epoch': int, 'weight_norm': float }
-    store.add_table('custom', CUSTOM_SCHEMA)
-    args.epoch_hook = log_norm
     
     # give to the main optim only the data_net
     model = train_model(args, model, loaders, store=store, update_params=feats_net_pars)
@@ -161,23 +214,12 @@ def setup_store_with_metadata(args):
     schema = cox.store.schema_from_dict(args_dict)
     store.add_table('metadata', schema)
     store['metadata'].append_row(args_dict)
+        # custom logs
+    CUSTOM_SCHEMA = {'epoch': int, 'weight_norm': float }
+    store.add_table('custom', CUSTOM_SCHEMA)
+    args.epoch_hook = log_norm
     return store
 
 if __name__ == "__main__":
-    args = parser.parse_args()
-    args = cox.utils.Parameters(args.__dict__)
-    #first check whether exp_id already exists
-    is_training = False
-    exp_dir_path = os.path.join(args.out_dir, args.exp_name)
-    if os.path.exists(exp_dir_path):
-        is_training = check_experiment_status(args.out_dir, args.exp_name)
-        
-        if is_training and (not args.resume or args.eval_only):
-            s = cox.store.Store(args.out_dir, args.exp_name)
-            model, checkpoint, _, store, args = model_dataset_from_store(s, 
-                    overwrite_params={}, which='last', mode='a', parallel=True)
-            final_model = main(args, model=model, checkpoint=checkpoint, store=store)
-    else:
-        args = setup_args(args)
-        store = setup_store_with_metadata(args)
-        final_model = main(args, store=store)
+    main()
+
