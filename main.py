@@ -23,7 +23,7 @@ import torch.utils.data.distributed
 import torch.distributed as dist
 
 
-def log_norm(mod, log_info):
+def log_norm(store, mod, log_info):
     curr_params = flatten(mod.parameters())
     log_info_custom = { 'epoch': log_info['epoch'],
                         'weight_norm': ch.norm(curr_params).detach().cpu().numpy() }
@@ -55,6 +55,8 @@ def main():
     is_training = False
     checkpoint = None
     model = None
+    store = None
+
     exp_dir_path = os.path.join(args.out_dir, args.exp_name) if  args.exp_name else None
     if os.path.exists(exp_dir_path):
         is_training = check_experiment_status(args.out_dir, args.exp_name)
@@ -65,7 +67,6 @@ def main():
                     overwrite_params={}, which='last', mode='a', parallel=True)
     else:
         args = setup_args(args)
-        store = setup_store_with_metadata(args)
     
     if args.dist_url == "env://" and args.world_size == -1:
         args.world_size = int(os.environ["WORLD_SIZE"])
@@ -80,7 +81,7 @@ def main():
         # Use torch.multiprocessing.spawn to launch distributed processes: the
         # main_worker process function
         #mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args.params,model,checkpoint,store))
-        mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args, model, checkpoint, store.path))
+        mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args, model, checkpoint, store))
     else:
         # Simply call main_worker function
         final_model = main_worker(None, args, model=model, checkpoint=checkpoint, store=store)
@@ -91,6 +92,7 @@ def main_worker(gpu, args, model, checkpoint, store):
     trains as a model. Check out the argparse object in this file for
     argument options.
     '''
+    
     if args.distributed:
         if args.dist_url == "env://" and args.rank == -1:
             args.rank = int(os.environ["RANK"])
@@ -103,6 +105,11 @@ def main_worker(gpu, args, model, checkpoint, store):
 
     args = cox.utils.Parameters(args.__dict__)
     
+    if not args.multiprocessing_distributed or (args.multiprocessing_distributed
+            and args.rank % args.ngpus_per_node == 0):
+        if not store:
+            store = setup_store_with_metadata(args)
+
     # MAKE DATASET AND LOADERS
     data_path = os.path.expandvars(args.data)
     dataset = DATASETS[args.dataset](data_path)
@@ -168,31 +175,6 @@ def main_worker(gpu, args, model, checkpoint, store):
     model = train_model(args, model, loaders, store=store, update_params=feats_net_pars)
     return model
 
-def setup_args(args):
-    '''
-    Fill the args object with reasonable defaults from
-    :mod:`robustness.defaults`, and also perform a sanity check to make sure no
-    args are missing.
-    '''
-    # override non-None values with optional config_path
-    if args.config_path:
-        args = cox.utils.override_json(args, args.config_path)
-
-    ds_class = DATASETS[args.dataset]
-    args = check_and_fill_args(args, defaults.CONFIG_ARGS, ds_class)
-
-    if not args.eval_only:
-        args = check_and_fill_args(args, defaults.TRAINING_ARGS, ds_class)
-
-    if args.adv_train or args.adv_eval:
-        args = check_and_fill_args(args, defaults.PGD_ARGS, ds_class)
-
-    args = check_and_fill_args(args, defaults.MODEL_LOADER_ARGS, ds_class)
-    args = check_and_fill_args(args, extra_args, ds_class)
-
-    if args.eval_only: assert args.resume is not None, \
-            "Must provide a resume path if only evaluating"
-    return args
 
 def setup_store_with_metadata(args):
     '''
@@ -219,6 +201,34 @@ def setup_store_with_metadata(args):
     store.add_table('custom', CUSTOM_SCHEMA)
     args.epoch_hook = log_norm
     return store
+
+
+def setup_args(args):
+    '''
+    Fill the args object with reasonable defaults from
+    :mod:`robustness.defaults`, and also perform a sanity check to make sure no
+    args are missing.
+    '''
+    # override non-None values with optional config_path
+    if args.config_path:
+        args = cox.utils.override_json(args, args.config_path)
+
+    ds_class = DATASETS[args.dataset]
+    args = check_and_fill_args(args, defaults.CONFIG_ARGS, ds_class)
+
+    if not args.eval_only:
+        args = check_and_fill_args(args, defaults.TRAINING_ARGS, ds_class)
+
+    if args.adv_train or args.adv_eval:
+        args = check_and_fill_args(args, defaults.PGD_ARGS, ds_class)
+
+    args = check_and_fill_args(args, defaults.MODEL_LOADER_ARGS, ds_class)
+    args = check_and_fill_args(args, extra_args, ds_class)
+
+    if args.eval_only: assert args.resume is not None, \
+            "Must provide a resume path if only evaluating"
+    return args
+
 
 if __name__ == "__main__":
     main()
