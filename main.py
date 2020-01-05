@@ -18,9 +18,6 @@ from exp_library.defaults import check_and_fill_args
 from exp_library.loaders import DuplicateLoader
 from exp_library.pytorch_modelsize import SizeEstimator
 from torch.nn.utils import parameters_to_vector as flatten
-import torch.multiprocessing as mp
-import torch.utils.data.distributed
-import torch.distributed as dist
 
 
 def log_norm(mod, log_info):
@@ -67,40 +64,14 @@ def main():
         args = setup_args(args)
         store = setup_store_with_metadata(args)
     
-    if args.dist_url == "env://" and args.world_size == -1:
-        args.world_size = int(os.environ["WORLD_SIZE"])
-
-    args.distributed = args.world_size > 1 or args.multiprocessing_distributed
-    args.ngpus_per_node = ch.cuda.device_count()
-
-    if args.multiprocessing_distributed:
-        # Since we have ngpus_per_node processes per node, the total world_size
-        # needs to be adjusted accordingly
-        args.world_size = args.ngpus_per_node * args.world_size
-        # Use torch.multiprocessing.spawn to launch distributed processes: the
-        # main_worker process function
-        #mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args.params,model,checkpoint,store))
-        mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args, model, checkpoint, store.path))
-    else:
-        # Simply call main_worker function
-        final_model = main_worker(None, args, model=model, checkpoint=checkpoint, store=store)
+    final_model = main_worker(args, model=model, checkpoint=checkpoint, store=store)
 
 
-def main_worker(gpu, args, model, checkpoint, store):
+def main_worker(args, model, checkpoint, store):
     '''Given arguments from `setup_args` and a store from `setup_store`,
     trains as a model. Check out the argparse object in this file for
     argument options.
     '''
-    if args.distributed:
-        if args.dist_url == "env://" and args.rank == -1:
-            args.rank = int(os.environ["RANK"])
-        if args.multiprocessing_distributed:
-            # For multiprocessing distributed training, rank needs to be the
-            # global rank among all the processes
-            args.rank = args.rank * args.ngpus_per_node + gpu
-        dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                                world_size=args.world_size, rank=args.rank)
-
     args = cox.utils.Parameters(args.__dict__)
     
     # MAKE DATASET AND LOADERS
@@ -123,7 +94,6 @@ def main_worker(gpu, args, model, checkpoint, store):
                     args.batch_size, data_aug=bool(args.data_aug), 
                     subset=subset, distributed=args.distributed)
 
-    args.train_sampler = train_sampler
     # args.duplicates = 3
     # train_loader = DuplicateLoader(train_loader, args.duplicates)
 
@@ -133,7 +103,6 @@ def main_worker(gpu, args, model, checkpoint, store):
     class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
                     args.batch_size * args.inner_batch_factor,
                     data_aug=bool(args.data_aug), distributed=args.distributed)
-    args.class_sampler = class_sampler
 
     train_loader = helpers.DataPrefetcher(train_loader)
     val_loader = helpers.DataPrefetcher(val_loader)
