@@ -92,7 +92,7 @@ def main_worker(args, model, checkpoint, store):
 
     train_loader, val_loader, train_sampler = dataset.make_loaders(args.workers,
                     args.batch_size, data_aug=bool(args.data_aug), 
-                    subset=subset, distributed=args.distributed)
+                    subset=subset)
 
     # args.duplicates = 3
     # train_loader = DuplicateLoader(train_loader, args.duplicates)
@@ -102,7 +102,7 @@ def main_worker(args, model, checkpoint, store):
     
     class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
                     args.batch_size * args.inner_batch_factor,
-                    data_aug=bool(args.data_aug), distributed=args.distributed)
+                    data_aug=bool(args.data_aug))
 
     train_loader = helpers.DataPrefetcher(train_loader)
     val_loader = helpers.DataPrefetcher(val_loader)
