@@ -100,7 +100,7 @@ def main_worker(args, model, checkpoint, store):
     #inner_batch_factor = 2# if args.dataset == 'cifar' else 2
     #args.inner_batch_factor = inner_batch_factor
     
-    class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
+    class_loader, _ = dataset.make_loaders(args.workers // args.inner_batch_factor,
                     args.batch_size * args.inner_batch_factor,
                     data_aug=bool(args.data_aug))
 
