@@ -15,13 +15,13 @@ from exp_library.decoupled_train import train_model, eval_model
 from exp_library.tools import constants, helpers
 from exp_library import defaults, __version__
 from exp_library.defaults import check_and_fill_args
-from exp_library.loaders import DuplicateLoader
+# from exp_library.loaders import DuplicateLoader
 from exp_library.pytorch_modelsize import SizeEstimator
 from torch.nn.utils import parameters_to_vector as flatten
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
 import torch.distributed as dist
-
+from copy import deepcopy
 
 def log_norm(store, mod, log_info):
     curr_params = flatten(mod.parameters())
@@ -46,6 +46,22 @@ extra_args = [
              ]
 
 parser = defaults.add_args_to_parser(extra_args, parser)
+
+def duplicate_datasets(loader, duplicates=2):
+    datasets = []
+    for it in range(duplicates):
+        datasets.append(deepcopy(loader.dataset) if it > 0 else loader.dataset)
+    dataset = ch.utils.data.ConcatDataset(datasets)
+    kwargs  = dict()
+
+    kwargs = {
+        'batch_size': duplicates * loader.batch_size,
+        'num_workers': loader.num_workers,
+        'drop_last': loader.drop_last,
+        'pin_memory': loader.pin_memory,
+        'shuffle': True
+    }
+    return ch.utils.data.DataLoader(dataset, **kwargs)
 
 
 def main():
@@ -103,6 +119,14 @@ def main_worker(gpu, args, model, checkpoint, store):
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                 world_size=args.world_size, rank=args.rank)
 
+    if gpu is not None:
+        ch.cuda.set_device(gpu)
+        # When using a single GPU per process and per
+        # DistributedDataParallel, we need to divide the batch size
+        # ourselves based on the total number of GPUs we have
+        args.batch_size = int(args.batch_size / args.ngpus_per_node)
+        args.workers = int((args.workers + args.ngpus_per_node - 1) / args.ngpus_per_node)
+
     args = cox.utils.Parameters(args.__dict__)
     
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed
@@ -113,6 +137,7 @@ def main_worker(gpu, args, model, checkpoint, store):
     # MAKE DATASET AND LOADERS
     data_path = os.path.expandvars(args.data)
     dataset = DATASETS[args.dataset](data_path)
+    args.num_classes = dataset.num_classes
 
     subset = None
     if 'cifar' in args.dataset and args.cifar_imb > 0:
@@ -126,27 +151,25 @@ def main_worker(gpu, args, model, checkpoint, store):
             targets = CIFAR100(data_path).targets
             subset = get_imb_subset(targets, args.cifar_imb, 'cifar100')
 
+    args.duplicates = args.inner_batch_factor + 1
+    #args.batch_size = args.batch_size * args.duplicates
     train_loader, val_loader, train_sampler = dataset.make_loaders(args.workers,
                     args.batch_size, data_aug=bool(args.data_aug), 
                     subset=subset, distributed=args.distributed)
 
     args.train_sampler = train_sampler
-    # args.duplicates = 3
-    # train_loader = DuplicateLoader(train_loader, args.duplicates)
-
-    #inner_batch_factor = 2# if args.dataset == 'cifar' else 2
-    #args.inner_batch_factor = inner_batch_factor
+    train_loader = duplicate_datasets(train_loader, duplicates=args.duplicates)
     
-    class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
-                    args.batch_size * args.inner_batch_factor,
-                    data_aug=bool(args.data_aug), distributed=args.distributed)
-    args.class_sampler = class_sampler
+    # class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
+    #                 args.batch_size * args.inner_batch_factor,
+    #                 data_aug=bool(args.data_aug), distributed=args.distributed)
+    # args.class_sampler = class_sampler
 
-    train_loader = helpers.DataPrefetcher(train_loader)
-    val_loader = helpers.DataPrefetcher(val_loader)
-    class_loader = helpers.DataPrefetcher(class_loader)
-    loaders = (train_loader, class_loader, val_loader)
-    # loaders = (train_loader, val_loader)
+    train_loader = helpers.DataPrefetcher(train_loader, gpu=gpu)
+    val_loader = helpers.DataPrefetcher(val_loader, gpu=gpu)
+    # class_loader = helpers.DataPrefetcher(class_loader)
+    # loaders = (train_loader, class_loader, val_loader)
+    loaders = (train_loader, val_loader)
     # MAKE MODEL
     model, checkpoint = make_and_restore_model(args, dataset=dataset)
     if 'module' in dir(model): model = model.module
@@ -172,7 +195,7 @@ def main_worker(gpu, args, model, checkpoint, store):
     feats_net_pars+= list(root_model.layer4.parameters())
     
     # give to the main optim only the data_net
-    model = train_model(args, model, loaders, store=store, update_params=feats_net_pars)
+    model = train_model(gpu, args, model, loaders, store=store, update_params=feats_net_pars)
     return model
 
 
