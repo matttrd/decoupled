@@ -20,7 +20,7 @@ from exp_library.pytorch_modelsize import SizeEstimator
 from torch.nn.utils import parameters_to_vector as flatten
 
 
-def log_norm(mod, log_info):
+def log_norm(store, mod, log_info):
     curr_params = flatten(mod.parameters())
     log_info_custom = { 'epoch': log_info['epoch'],
                         'weight_norm': ch.norm(curr_params).detach().cpu().numpy() }
@@ -47,6 +47,7 @@ parser = defaults.add_args_to_parser(extra_args, parser)
 
 def main():
     args = parser.parse_args()
+    args = cox.utils.Parameters(args.__dict__)
 
     #first check whether exp_id already exists
     is_training = False
@@ -72,7 +73,6 @@ def main_worker(args, model, checkpoint, store):
     trains as a model. Check out the argparse object in this file for
     argument options.
     '''
-    args = cox.utils.Parameters(args.__dict__)
     
     # MAKE DATASET AND LOADERS
     data_path = os.path.expandvars(args.data)
