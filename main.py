@@ -90,7 +90,7 @@ def main_worker(args, model, checkpoint, store):
             targets = CIFAR100(data_path).targets
             subset = get_imb_subset(targets, args.cifar_imb, 'cifar100')
 
-    train_loader, val_loader, train_sampler = dataset.make_loaders(args.workers,
+    train_loader, val_loader = dataset.make_loaders(args.workers,
                     args.batch_size, data_aug=bool(args.data_aug), 
                     subset=subset)
 
