@@ -1,3 +1,4 @@
+
 from argparse import ArgumentParser
 import os
 import git
@@ -65,6 +66,8 @@ def duplicate_datasets(loader, duplicates=2):
 
 
 def main():
+	cudnn.benchmark = True
+	
     args = parser.parse_args()
 
     #first check whether exp_id already exists
@@ -172,6 +175,13 @@ def main_worker(gpu, args, model, checkpoint, store):
     loaders = (train_loader, val_loader)
     # MAKE MODEL
     model, checkpoint = make_and_restore_model(args, dataset=dataset)
+
+    if args.sync_bn:
+        import apex
+        print("using apex synced BN")
+        model = apex.parallel.convert_syncbn_model(model)
+
+   
     if 'module' in dir(model): model = model.module
 
     #print(args)
