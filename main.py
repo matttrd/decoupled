@@ -66,7 +66,7 @@ def duplicate_datasets(loader, duplicates=2):
 
 
 def main():
-	cudnn.benchmark = True
+    cudnn.benchmark = True
 	
     args = parser.parse_args()
 
