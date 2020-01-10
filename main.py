@@ -39,7 +39,8 @@ extra_args = [
 ['lr-cl', float, 'learning rate of the classifier', 0.0001],
 ['cifar-imb', float, 'imbalance factor for cifar', -1],
 ['entr-reg', [0, 1], 'penalize entropic outputs', 0],
-['inner-batch-factor', int, 'inner batch factor', 2]
+['inner-batch-factor', int, 'inner batch factor', 2],
+['class-balanced', [0, 1], 'class-awere sampler for classifier', 0]
              ]
 
 parser = defaults.add_args_to_parser(extra_args, parser)
@@ -90,6 +91,7 @@ def main_worker(args, model, checkpoint, store):
             targets = CIFAR100(data_path).targets
             subset = get_imb_subset(targets, args.cifar_imb, 'cifar100')
 
+    
     train_loader, val_loader = dataset.make_loaders(args.workers,
                     args.batch_size, data_aug=bool(args.data_aug), 
                     subset=subset)
@@ -100,9 +102,9 @@ def main_worker(args, model, checkpoint, store):
     #inner_batch_factor = 2# if args.dataset == 'cifar' else 2
     #args.inner_batch_factor = inner_batch_factor
     
-    class_loader, _ = dataset.make_loaders(args.workers // args.inner_batch_factor,
+    class_loader, _ = dataset.make_loaders(args.workers,
                     args.batch_size * args.inner_batch_factor,
-                    data_aug=bool(args.data_aug))
+                    data_aug=bool(args.data_aug), class_sampler=args.class_balanced)
 
     train_loader = helpers.DataPrefetcher(train_loader)
     val_loader = helpers.DataPrefetcher(val_loader)
