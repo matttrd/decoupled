@@ -82,10 +82,10 @@ def main():
         
         if is_training and (not args.resume or args.eval_only):
             s = cox.store.Store(args.out_dir, args.exp_name)
-            model, checkpoint, _, store, args = model_dataset_from_store(s, 
+            model, checkpoint, _, store, _ = model_dataset_from_store(s, 
                     overwrite_params={}, which='last', mode='a', parallel=True)
-    else:
-        args = setup_args(args)
+    
+    args = setup_args(args)
     
     if args.dist_url == "env://" and args.world_size == -1:
         args.world_size = int(os.environ["WORLD_SIZE"])
