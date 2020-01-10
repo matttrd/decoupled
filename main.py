@@ -68,7 +68,6 @@ def duplicate_datasets(loader, duplicates=2):
 
 def main():
     cudnn.benchmark = True
-	
     args = parser.parse_args()
 
     #first check whether exp_id already exists
