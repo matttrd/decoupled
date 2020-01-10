@@ -23,6 +23,7 @@ import torch.multiprocessing as mp
 import torch.utils.data.distributed
 import torch.distributed as dist
 from copy import deepcopy
+import torch.backends.cudnn as cudnn
 
 def log_norm(store, mod, log_info):
     curr_params = flatten(mod.parameters())
