@@ -1,4 +1,3 @@
-
 from argparse import ArgumentParser
 import os
 import git
@@ -16,14 +15,12 @@ from exp_library.decoupled_train import train_model, eval_model
 from exp_library.tools import constants, helpers
 from exp_library import defaults, __version__
 from exp_library.defaults import check_and_fill_args
-# from exp_library.loaders import DuplicateLoader
-from exp_library.pytorch_modelsize import SizeEstimator
 from torch.nn.utils import parameters_to_vector as flatten
-import torch.multiprocessing as mp
 import torch.utils.data.distributed
 import torch.distributed as dist
 from copy import deepcopy
 import torch.backends.cudnn as cudnn
+import multiprocessing as mp
 
 def log_norm(store, mod, log_info):
     curr_params = flatten(mod.parameters())
@@ -33,12 +30,12 @@ def log_norm(store, mod, log_info):
 
 
 parser = ArgumentParser()
+# parser.add_argument('--local_rank', type=int, default=0)
 parser = defaults.add_args_to_parser(defaults.CONFIG_ARGS, parser)
 parser = defaults.add_args_to_parser(defaults.MODEL_LOADER_ARGS, parser)
 parser = defaults.add_args_to_parser(defaults.TRAINING_ARGS, parser)
 parser = defaults.add_args_to_parser(defaults.PGD_ARGS, parser)
-# parser = defaults.add_args_to_parser([['weight_decay_cl', float, 'weight decay classifier', 0.0001]], parser)
-# parser = defaults.add_args_to_parser([['lr_cl', float, 'learning rate of the classifier', 0.0001]], parser)
+
 extra_args = [
 ['weight-decay-cl', float, 'weight decay classifier', 0.0001],
 ['lr-cl', float, 'learning rate of the classifier', 0.0001],
@@ -67,75 +64,51 @@ def duplicate_datasets(loader, duplicates=2):
 
 
 def main():
+
     cudnn.benchmark = True
     args = parser.parse_args()
-
+    args = setup_args(args)
+    args = cox.utils.Parameters(args.__dict__)
+    
     #first check whether exp_id already exists
+    is_training_gl = None
     is_training = False
     checkpoint = None
     model = None
     store = None
 
+    # p = mp.current_process()
+
     exp_dir_path = os.path.join(args.out_dir, args.exp_name) if  args.exp_name else None
-    if os.path.exists(exp_dir_path):
+    
+    if os.path.exists(exp_dir_path) and args.local_rank == 0:
         is_training = check_experiment_status(args.out_dir, args.exp_name)
+        is_training_gl = mp.Value('i', is_training)
         
-        if is_training and (not args.resume or args.eval_only):
-            s = cox.store.Store(args.out_dir, args.exp_name)
-            model, checkpoint, _, store, _ = model_dataset_from_store(s, 
-                    overwrite_params={}, which='last', mode='a', parallel=True)
+        if is_training_gl and not args.eval_only:
+            mode = 'a' if args.local_rank == 0 else 'r'
+            model, checkpoint, _, store, _ = model_dataset_from_store((args.out_dir, args.exp_name), 
+                    overwrite_params={}, which='last', mode=mode, parallel=False)
     
-    args = setup_args(args)
-    
-    if args.dist_url == "env://" and args.world_size == -1:
-        args.world_size = int(os.environ["WORLD_SIZE"])
+    args.distributed = False
+    if 'WORLD_SIZE' in os.environ:
+        args.distributed = int(os.environ['WORLD_SIZE']) > 1
 
-    args.distributed = args.world_size > 1 or args.multiprocessing_distributed
-    args.ngpus_per_node = ch.cuda.device_count()
+    args.gpu = 0
+    args.world_size = 1
 
-    if args.multiprocessing_distributed:
-        # Since we have ngpus_per_node processes per node, the total world_size
-        # needs to be adjusted accordingly
-        args.world_size = args.ngpus_per_node * args.world_size
-        # Use torch.multiprocessing.spawn to launch distributed processes: the
-        # main_worker process function
-        #mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args.params,model,checkpoint,store))
-        mp.spawn(main_worker, nprocs=args.ngpus_per_node, args=(args, model, checkpoint, store))
-    else:
-        # Simply call main_worker function
-        final_model = main_worker(None, args, model=model, checkpoint=checkpoint, store=store)
-
-
-def main_worker(gpu, args, model, checkpoint, store):
-    '''Given arguments from `setup_args` and a store from `setup_store`,
-    trains as a model. Check out the argparse object in this file for
-    argument options.
-    '''
-    
     if args.distributed:
-        if args.dist_url == "env://" and args.rank == -1:
-            args.rank = int(os.environ["RANK"])
-        if args.multiprocessing_distributed:
-            # For multiprocessing distributed training, rank needs to be the
-            # global rank among all the processes
-            args.rank = args.rank * args.ngpus_per_node + gpu
-        dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                                world_size=args.world_size, rank=args.rank)
+        args.gpu = args.local_rank
+        torch.cuda.set_device(args.gpu)
+        torch.distributed.init_process_group(backend='nccl',
+                                             init_method='env://')
+        args.world_size = torch.distributed.get_world_size()
 
-    if gpu is not None:
-        ch.cuda.set_device(gpu)
-        # When using a single GPU per process and per
-        # DistributedDataParallel, we need to divide the batch size
-        # ourselves based on the total number of GPUs we have
-        args.batch_size = int(args.batch_size / args.ngpus_per_node)
-        args.workers = int((args.workers + args.ngpus_per_node - 1) / args.ngpus_per_node)
-
-    args = cox.utils.Parameters(args.__dict__)
+    assert torch.backends.cudnn.enabled, "Amp requires cudnn backend to be enabled."
     
-    if not args.multiprocessing_distributed or (args.multiprocessing_distributed
-            and args.rank % args.ngpus_per_node == 0):
-        if not store:
-            store = setup_store_with_metadata(args)
+    
+    if args.rank == 0 and not store:
+        store = setup_store_with_metadata(args)
 
     # MAKE DATASET AND LOADERS
     data_path = os.path.expandvars(args.data)
@@ -161,21 +134,38 @@ def main_worker(gpu, args, model, checkpoint, store):
                     subset=subset, distributed=args.distributed)
 
     args.train_sampler = train_sampler
-    train_loader = duplicate_datasets(train_loader, duplicates=args.duplicates)
+    # train_loader = duplicate_datasets(train_loader, duplicates=args.duplicates)
     
-    # class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
-    #                 args.batch_size * args.inner_batch_factor,
-    #                 data_aug=bool(args.data_aug), distributed=args.distributed)
-    # args.class_sampler = class_sampler
+    class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
+                    args.batch_size * args.inner_batch_factor,
+                    data_aug=bool(args.data_aug), distributed=args.distributed)
+    args.class_sampler = class_sampler
 
-    train_loader = helpers.DataPrefetcher(train_loader, gpu=gpu)
-    val_loader = helpers.DataPrefetcher(val_loader, gpu=gpu)
-    # class_loader = helpers.DataPrefetcher(class_loader)
-    # loaders = (train_loader, class_loader, val_loader)
-    loaders = (train_loader, val_loader)
+    def most_difficult_examples(inp, target, **kwargs):
+        has_custom_train_loss = helpers.has_attr(args, 'custom_train_loss')
+        train_criterion = args.custom_train_loss if has_custom_train_loss \
+            else ch.nn.CrossEntropyLoss(reduction='none')
+        from copy import deepcopy
+        mc = deepcopy(kwargs['model'])
+        mc.eval()
+        with ch.no_grad():
+            (out, reps), _ = mc(inp / 255., with_latent=True)
+            loss_tensor = train_criterion(out.detach(), target)
+            indices = loss_tensor.sort(descending=True).indices[:args.batch_size]
+            target = target[indices]
+            rep = reps[indices].detach()
+        return rep, target
+
+
     # MAKE MODEL
     model, checkpoint = make_and_restore_model(args, dataset=dataset)
 
+    train_loader = helpers.DataPrefetcher(train_loader)
+    val_loader = helpers.DataPrefetcher(val_loader)
+    class_loader = helpers.DataPrefetcher(class_loader, func=most_difficult_examples, model=model)
+    loaders = (train_loader, class_loader, val_loader)
+    # loaders = (train_loader, val_loader)
+    
     if args.sync_bn:
         import apex
         print("using apex synced BN")
@@ -185,7 +175,15 @@ def main_worker(gpu, args, model, checkpoint, store):
     if 'module' in dir(model): model = model.module
 
     #print(args)
+    if dataset.requires_lighting:
+        from .data_augmentation import Lighting, IMAGENET_PCA
+        lighting = Lighting(0.05, IMAGENET_PCA['eigval'].cuda(), 
+                      IMAGENET_PCA['eigvec'].cuda())
+    else:
+        lighting = None
+    args.lighting = lighting
 
+    
     # check for entr reg
     if args.entr_reg:
         def reg_loss(model, inp, targ):
@@ -203,10 +201,9 @@ def main_worker(gpu, args, model, checkpoint, store):
     feats_net_pars+= list(root_model.layer2.parameters())
     feats_net_pars+= list(root_model.layer3.parameters())
     feats_net_pars+= list(root_model.layer4.parameters())
-    
+          
     # give to the main optim only the data_net
-    model = train_model(gpu, args, model, loaders, store=store, update_params=feats_net_pars)
-    return model
+    model = train_model(args, model, loaders, store=store, update_params=feats_net_pars)
 
 
 def setup_store_with_metadata(args):
@@ -265,4 +262,3 @@ def setup_args(args):
 
 if __name__ == "__main__":
     main()
-
