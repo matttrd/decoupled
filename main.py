@@ -41,7 +41,8 @@ extra_args = [
 ['lr-cl', float, 'learning rate of the classifier', 0.0001],
 ['cifar-imb', float, 'imbalance factor for cifar', -1],
 ['entr-reg', [0, 1], 'penalize entropic outputs', 0],
-['inner-batch-factor', int, 'inner batch factor', 2]
+['inner-batch-factor', int, 'inner batch factor', 2],
+['class-balanced', [0, 1], 'class-awere sampler for classifier', 0]
              ]
 
 parser = defaults.add_args_to_parser(extra_args, parser)
@@ -134,11 +135,12 @@ def main():
                     subset=subset, distributed=args.distributed)
 
     args.train_sampler = train_sampler
-    # train_loader = duplicate_datasets(train_loader, duplicates=args.duplicates)
     
     class_loader, _, class_sampler = dataset.make_loaders(args.workers // args.inner_batch_factor,
-                    args.batch_size * args.inner_batch_factor,
-                    data_aug=bool(args.data_aug), distributed=args.distributed)
+                    args.batch_size * args.inner_batch_factor, subset=subset,
+                    data_aug=bool(args.data_aug), distributed=args.distributed, 
+                    class_sampler=args.class_balanced)
+    
     args.class_sampler = class_sampler
 
     def most_difficult_examples(inp, target, **kwargs):
@@ -151,7 +153,7 @@ def main():
         with ch.no_grad():
             (out, reps), _ = mc(inp / 255., with_latent=True)
             loss_tensor = train_criterion(out.detach(), target)
-            indices = loss_tensor.sort(descending=True).indices[:args.batch_size]
+            indices = loss_tensor.sort(descending=True).indices[:max(64, args.batch_size // args.inner_batch_factor)]
             target = target[indices]
             rep = reps[indices].detach()
         return rep, target
