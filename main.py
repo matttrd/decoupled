@@ -160,7 +160,8 @@ def main():
 
 
     # MAKE MODEL
-    model, checkpoint = make_and_restore_model(args, dataset=dataset)
+    if not checkpoint:
+        model, checkpoint = make_and_restore_model(args, dataset=dataset)
 
     train_loader = helpers.DataPrefetcher(train_loader)
     val_loader = helpers.DataPrefetcher(val_loader)
