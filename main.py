@@ -147,15 +147,16 @@ def main():
         has_custom_train_loss = helpers.has_attr(args, 'custom_train_loss')
         train_criterion = args.custom_train_loss if has_custom_train_loss \
             else ch.nn.CrossEntropyLoss(reduction='none')
-        from copy import deepcopy
-        mc = deepcopy(kwargs['model'])
+        mc = kwargs['model']
         mc.eval()
         with ch.no_grad():
             (out, reps), _ = mc(inp / 255., with_latent=True)
             loss_tensor = train_criterion(out.detach(), target)
-            indices = loss_tensor.sort(descending=True).indices[:max(64, args.batch_size // args.inner_batch_factor)]
+            # indices = loss_tensor.sort(descending=True).indices[:max(64, args.batch_size // args.inner_batch_factor)]
+            indices = loss_tensor.sort(descending=True).indices[:max(64, args.batch_size)]
             target = target[indices]
             rep = reps[indices].detach()
+        mc.train()
         return rep, target
 
 
@@ -179,7 +180,7 @@ def main():
 
     #print(args)
     if dataset.requires_lighting:
-        from .data_augmentation import Lighting, IMAGENET_PCA
+        from exp_library.data_augmentation import Lighting, IMAGENET_PCA
         lighting = Lighting(0.05, IMAGENET_PCA['eigval'].cuda(), 
                       IMAGENET_PCA['eigvec'].cuda())
     else:
