@@ -230,8 +230,8 @@ def setup_store_with_metadata(args):
     schema = cox.store.schema_from_dict(args_dict)
     store.add_table('metadata', schema)
     store['metadata'].append_row(args_dict)
-        # custom logs
-    CUSTOM_SCHEMA = {'epoch': int, 'weight_norm': float }
+    # custom logs
+    CUSTOM_SCHEMA = {'epoch': int, 'weight_norm': float}
     store.add_table('custom', CUSTOM_SCHEMA)
     args.epoch_hook = log_norm
     return store
