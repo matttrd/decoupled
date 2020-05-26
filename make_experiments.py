@@ -77,6 +77,34 @@ def get_type(name):
         return 'standard'
 
 
+def load(args, subfolder, shot=False):
+    fol = os.path.join(args.results, subfolder)
+    dfs = readers.CollectionReader(fol)
+    logs = dfs.df('logs')
+    tmp = logs['exp_id'].apply(lambda x: x.split('_'))
+    tr_dt, mode = tmp.apply(lambda x: x[0]), tmp.apply(lambda x: x[1])
+    logs['dataset'] = tr_dt
+    logs['mode'] = mode
+    logs['mode'] = logs['mode'].apply(lambda x: int(x))
+    if shot:
+        sh = tmp.apply(lambda x: x[2])
+        logs['shot'] = sh
+    return logs
+
+
+def concat(dfs, types):
+    for i, df in enumerate(dfs):
+        df['type'] = types[i]
+    return pd.concat(dfs)ù
+
+
+def filter(x):
+    if int(x['mode'].unique()) == 0:
+        return x.iloc[0:-1]
+    else:
+        return x
+
+
 def main():
     data_path = os.path.expandvars(args.data)
     dataset = DATASETS[args.dataset](data_path)
@@ -144,23 +172,19 @@ def main():
 
     if args.compare_dyn:
         subfolders = [f'trasf-{args.dataset}-st-new', f'trasf-{args.dataset}-rob-new']
-        fol = os.path.join(args.results, subfolders[0])
-        dfs = readers.CollectionReader(fol)
-        logs = dfs.df('logs')
-        tmp = logs['exp_id'].apply(lambda x: x.split('_'))
-        tr_dt, mode = tmp.apply(lambda x: x[0]), tmp.apply(lambda x: x[1])
-        logs['dataset'] = tr_dt
-        logs['mode'] = mode
-        # from IPython import embed
-        # embed()
+        logs_st = load(args, subfolders[0])
+        logs_st = logs_st.groupby('exp_id').apply(filter).reset_index(drop=True)
+        logs_rob = load(args, subfolders[1])
+        logs = concat((logs_st, logs_rob), ['st', 'rob'])
 
-        for dataset_name, group_dt in logs.groupby('dataset'):
-            fig, ax = plt.subplots()
-            for mode_name, group_mode in group_dt.groupby('mode'):  
-                group_mode.plot(x='epoch', y='nat_prec1', label=mode_name, ax=ax, legend=False)
-            plt.savefig(os.path.join(args.results, f'trasf_accuracy_{args.dataset}_{dataset_name}_{mode_name}.pdf'))
-            plt.close()
-        return 
+        sns.set_style('darkgrid')
+        grid = sns.FacetGrid(col='mode', data=logs)
+        grid.map_dataframe(sns.lineplot, "epoch", 'nat_prec1', hue='dataset',
+                           style='type', style_order=['rob', 'st'])
+        grid.axes[0, 2].legend(handles=grid._legend_data.values(), labels=grid._legend_data.keys(),
+                               loc='center', bbox_to_anchor=(1.25, 0.5), facecolor='white',
+                               edgecolor='white')
+        plt.savefig('dynamic_comparison.pdf')
 
     # if args.few_shot:
     #     #dfs = readers.CollectionReader(args.results)
@@ -170,8 +194,7 @@ def main():
     #     dfs = readers.CollectionReader(fol)
     #     logs = dfs.df('logs')
     #     #meta = dfs.df('metadata')
-        
-        
+           
     #     nat_prec1 = logs.groupby('exp_id').apply(lambda x: x['nat_prec1'].max())
     #     tmp = pd.DataFrame(nat_prec1.index)['exp_id'].apply(lambda x: x.split('_'))
     #     tr_dt, mode, shot = tmp.apply(lambda x: x[0]), tmp.apply(lambda x: x[1]), tmp.apply(lambda x: x[2])
