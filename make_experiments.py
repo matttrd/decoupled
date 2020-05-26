@@ -77,8 +77,7 @@ def get_type(name):
         return 'standard'
 
 
-def load(args, subfolder, shot=False):
-    fol = os.path.join(args.results, subfolder)
+def load(fol, shot=False):
     dfs = readers.CollectionReader(fol)
     logs = dfs.df('logs')
     tmp = logs['exp_id'].apply(lambda x: x.split('_'))
@@ -172,9 +171,10 @@ def main():
 
     if args.compare_dyn:
         subfolders = [f'trasf-{args.dataset}-st-new', f'trasf-{args.dataset}-rob-new']
-        logs_st = load(args, subfolders[0])
+        subfolders = [os.path.join(args.results, subfolder) for subfolder in subfolders]
+        logs_st = load(subfolders[0])
         logs_st = logs_st.groupby('exp_id').apply(filter).reset_index(drop=True)
-        logs_rob = load(args, subfolders[1])
+        logs_rob = load(subfolders[1])
         logs = concat((logs_st, logs_rob), ['st', 'rob'])
 
         sns.set_style('darkgrid')
@@ -186,6 +186,12 @@ def main():
                                edgecolor='white')
         plt.savefig('dynamic_comparison.pdf')
 
+        plt.figure()
+        tmp = logs_st.groupby(['exp_id', 'type']).max().reset_index()
+        g = sns.lineplot(data=tmp, y='nat_prec1', x='mode', hue='dataset', style='type', markers=True)
+        plt.legend(loc='center', bbox_to_anchor=(1.15, 0.5), facecolor='white', edgecolor='white')
+        plt.savefig('dynamic_comparison_mode.pdf')
+
     # if args.few_shot:
     #     #dfs = readers.CollectionReader(args.results)
     #     #subfolders = [f'trasf-{args.dataset}-st-shot', f'trasf-{args.dataset}-rob-shot']
@@ -194,7 +200,7 @@ def main():
     #     dfs = readers.CollectionReader(fol)
     #     logs = dfs.df('logs')
     #     #meta = dfs.df('metadata')
-           
+
     #     nat_prec1 = logs.groupby('exp_id').apply(lambda x: x['nat_prec1'].max())
     #     tmp = pd.DataFrame(nat_prec1.index)['exp_id'].apply(lambda x: x.split('_'))
     #     tr_dt, mode, shot = tmp.apply(lambda x: x[0]), tmp.apply(lambda x: x[1]), tmp.apply(lambda x: x[2])
@@ -216,11 +222,11 @@ def main():
     #             plt.savefig(os.path.join(args.results, f'trasf_accuracy_{args.dataset}_{dataset_name}.pdf'))
                 #plt.clf()
 
-        for name, group in logs.groupby('exp_id'):
-            group.plot(x='epoch', y='nat_prec1', label=name, ax=ax, legend=False)
-            handles, labels = ax.get_legend_handles_labels()
-            labels = list(map(lambda x: x.split('_')[1], labels))
-            labels = list(map(lambda x: r"$\varepsilon =" + x + "$", labels))
+        # for name, group in logs.groupby('exp_id'):
+        #     group.plot(x='epoch', y='nat_prec1', label=name, ax=ax, legend=False)
+        #     handles, labels = ax.get_legend_handles_labels()
+        #     labels = list(map(lambda x: x.split('_')[1], labels))
+        #     labels = list(map(lambda x: r"$\varepsilon =" + x + "$", labels))
 
     
     # bashCommand = "rsync -av -R results/cifar/**/*.pdf ~/Dropbox/tnse --include 'tsne'"
