@@ -94,7 +94,7 @@ def load(fol, shot=False):
 def concat(dfs, types):
     for i, df in enumerate(dfs):
         df['type'] = types[i]
-    return pd.concat(dfs)ù
+    return pd.concat(dfs)
 
 
 def filter(x):
