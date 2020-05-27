@@ -6,16 +6,16 @@ from sklearn import manifold
 from argparse import ArgumentParser
 import numpy as np
 from glob2 import glob
-from exp_library.model_utils import make_and_restore_model
+# from exp_library.model_utils import make_and_restore_model
 import pandas as pd
 import os
 from exp_library.datasets import DATASETS
-from exp_library.model_utils import make_and_restore_model, \
-                                check_experiment_status, \
-                                model_dataset_from_store
+# from exp_library.model_utils import make_and_restore_model, \
+#                                 check_experiment_status, \
+#                                 model_dataset_from_store
 from cox import readers
 from matplotlib import rc
-rc('text', usetex=True)
+#rc('text', usetex=True)
 
 
 parser = ArgumentParser()
@@ -105,16 +105,16 @@ def filter(x):
 
 
 def main():
-    data_path = os.path.expandvars(args.data)
-    dataset = DATASETS[args.dataset](data_path)
-    train_loader, val_loader, _ = dataset.make_loaders(workers=8, 
-                                          batch_size=args.batch_size)
+    # data_path = os.path.expandvars(args.data)
+    # dataset = DATASETS[args.dataset](data_path)
+    # train_loader, val_loader, _ = dataset.make_loaders(workers=8, 
+    #                                       batch_size=args.batch_size)
 
 
-    experiments = glob(args.results + '/**/checkpoint.pt.latest')
+    # experiments = glob(args.results + '/**/checkpoint.pt.latest')
 
-    df = pd.DataFrame(columns=['eps', 'snn', 'type'])
-    d = {'eps':[], 'snn':[], 'type':[]}
+    # df = pd.DataFrame(columns=['eps', 'snn', 'type'])
+    # d = {'eps':[], 'snn':[], 'type':[]}
 
     if args.norm:
         dfs = readers.CollectionReader(args.results)
@@ -133,6 +133,7 @@ def main():
         return
 
     if args.tsne or args.snn:
+        from exp_library.model_utils import model_dataset_from_store
         for exp in experiments:
             target_folder = exp.rsplit('/',1)[0]
             tmp = target_folder.rsplit('/',1)
@@ -177,20 +178,25 @@ def main():
         logs_rob = load(subfolders[1])
         logs = concat((logs_st, logs_rob), ['st', 'rob'])
 
+        plt.figure()
         sns.set_style('darkgrid')
         grid = sns.FacetGrid(col='mode', data=logs)
         grid.map_dataframe(sns.lineplot, "epoch", 'nat_prec1', hue='dataset',
                            style='type', style_order=['rob', 'st'])
-        grid.axes[0, 2].legend(handles=grid._legend_data.values(), labels=grid._legend_data.keys(),
+        lgd = grid.axes[0, 2].legend(handles=grid._legend_data.values(), labels=grid._legend_data.keys(),
                                loc='center', bbox_to_anchor=(1.25, 0.5), facecolor='white',
                                edgecolor='white')
-        plt.savefig('dynamic_comparison.pdf')
+        plt.show()
+        grid.savefig(f'results/dynamic_comparison_{args.dataset}.pdf', bbox_extra_artists=(lgd,), bbox_inches='tight')
 
         plt.figure()
-        tmp = logs_st.groupby(['exp_id', 'type']).max().reset_index()
-        g = sns.lineplot(data=tmp, y='nat_prec1', x='mode', hue='dataset', style='type', markers=True)
-        plt.legend(loc='center', bbox_to_anchor=(1.15, 0.5), facecolor='white', edgecolor='white')
-        plt.savefig('dynamic_comparison_mode.pdf')
+        tmp = logs.groupby(['exp_id', 'type']).max().reset_index()
+        sns.lineplot(data=tmp, y='nat_prec1', x='mode', hue='dataset', style='type', markers=True)
+        lgd = plt.legend(loc='center', bbox_to_anchor=(1.15, 0.5), facecolor='white', edgecolor='white')
+        plt.savefig(f"results/dynamic_comparison_mode_{args.dataset}.pdf", bbox_extra_artists=(lgd,), bbox_inches='tight')
+        tmp = logs.groupby(['dataset', 'mode', 'type']).max().reset_index()
+        pivot = pd.pivot_table(tmp, index=['mode', 'type'], columns=['dataset'], values='nat_prec1')
+        pivot.to_latex(f"results/dynamic_comparison_mode_{args.dataset}.tex", float_format="%.2f")
 
     # if args.few_shot:
     #     #dfs = readers.CollectionReader(args.results)
