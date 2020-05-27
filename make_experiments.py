@@ -16,7 +16,9 @@ from exp_library.datasets import DATASETS
 from cox import readers
 from matplotlib import rc
 #rc('text', usetex=True)
-
+import itertools
+from matplotlib.patches import Rectangle
+sns.set_style('darkgrid')
 
 parser = ArgumentParser()
 parser.add_argument('--data', default='', type=str, help='path to dataset')
@@ -89,6 +91,36 @@ def load(fol, shot=False):
         sh = tmp.apply(lambda x: x[2])
         logs['shot'] = sh
     return logs
+
+
+def load_with_seeds(fol, shot=False):
+    logs = []
+    for name in os.listdir(fol):
+        subfol = os.path.join(fol, name)
+        if os.path.isdir(subfol):
+            log = load(subfol, shot)
+            log['seed'] = int(name)
+            logs.append(log)
+    return pd.concat(logs)
+
+
+def multireg(data, x, y, hue, style):
+    markers = {'rob': 'o', 'st': 'x'}
+    lines = {'rob': '-', 'st': '--'}
+    styles = data[style].unique()
+    hues = data[hue].unique()
+    colors = {h:sns.color_palette()[i] for i, h in enumerate(hues)}
+    ax = None
+    for h, s in itertools.product(hues, styles):
+        idx = (data[hue] == h) & (data[style] == s)
+        tmp = data[idx]
+        ax = sns.regplot(data=tmp, x=x, y=y, ax=ax, marker=markers[s], color = colors[h], line_kws={'ls':lines[s]})
+    title_proxy = Rectangle((0,0), 0, 0, color='w')
+    handles = [title_proxy] + ax.lines[0::2] + [title_proxy, plt.Line2D([0], [0], color='black', ls='-'), plt.Line2D([0], [0], color='black', ls='--')]
+    labels = ['dataset'] + hues.tolist() + ["type"] + styles.tolist()
+    plt.xlim([-0.1, 2.1])
+    lgd = plt.legend(handles=handles, labels=labels, loc='center', bbox_to_anchor=(1.15, 0.5), facecolor='white', edgecolor='white')
+    return ax, lgd
 
 
 def concat(dfs, types):
@@ -179,7 +211,6 @@ def main():
         logs = concat((logs_st, logs_rob), ['st', 'rob'])
 
         plt.figure()
-        sns.set_style('darkgrid')
         grid = sns.FacetGrid(col='mode', data=logs)
         grid.map_dataframe(sns.lineplot, "epoch", 'nat_prec1', hue='dataset',
                            style='type', style_order=['rob', 'st'])
@@ -198,25 +229,20 @@ def main():
         pivot = pd.pivot_table(tmp, index=['mode', 'type'], columns=['dataset'], values='nat_prec1')
         pivot.to_latex(f"results/dynamic_comparison_mode_{args.dataset}.tex", float_format="%.2f")
 
-    # if args.few_shot:
-    #     #dfs = readers.CollectionReader(args.results)
-    #     #subfolders = [f'trasf-{args.dataset}-st-shot', f'trasf-{args.dataset}-rob-shot']
-    #     subfolders = [f'trasf-{args.dataset}-st-new', f'trasf-{args.dataset}-rob-new']
-    #     fol = os.path.join(args.results, subfolders[0])
-    #     dfs = readers.CollectionReader(fol)
-    #     logs = dfs.df('logs')
-    #     #meta = dfs.df('metadata')
+    if args.few_shot:
+        subfolders = [f'trasf-{args.dataset}-st-shot-fast', f'trasf-{args.dataset}-rob-shot-fast']
+        subfolders = [os.path.join(args.results, subfolder) for subfolder in subfolders]
+        logs = [load_with_seeds(subfolder, True) for subfolder in subfolders]
+        logs = concat(logs, ['st', 'rob'])
 
-    #     nat_prec1 = logs.groupby('exp_id').apply(lambda x: x['nat_prec1'].max())
-    #     tmp = pd.DataFrame(nat_prec1.index)['exp_id'].apply(lambda x: x.split('_'))
-    #     tr_dt, mode, shot = tmp.apply(lambda x: x[0]), tmp.apply(lambda x: x[1]), tmp.apply(lambda x: x[2])
-    #     df = pd.DataFrame()
-    #     df['nat_prec1'] = nat_prec1.values
-    #     df['dataset'] = tr_dt
-    #     df['mode'] = mode
-    #     #df['shot'] = shot
-    #     #df['shot'] = df['shot'].apply(lambda x: int(x))
-    #     #df = df.sort_values('shot')
+        tmp = logs.groupby(['exp_id', 'type', 'seed']).max().reset_index()
+        seed_avg = tmp.groupby(['dataset', 'shot', 'mode', 'type']).mean()
+        seed_std = tmp.groupby(['dataset', 'shot', 'mode', 'type']).std()
+
+        seed_avg = seed_avg.reset_index()
+        seed_avg['shot'] = seed_avg['shot'].apply(lambda x: int(x))
+        ax, lgd = multireg(seed_avg, y='nat_prec1', x='mode', hue='dataset', style='type')
+        plt.savefig(f"results/comparison_mode_few_{args.dataset}.pdf", bbox_extra_artists=(lgd,), bbox_inches='tight')
 
     #     from IPython import embed
     #     embed()
