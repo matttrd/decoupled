@@ -109,13 +109,13 @@ def multireg(data, x, y, hue, style):
     lines = {'rob': '-', 'st': '--'}
     styles = data[style].unique()
     hues = data[hue].unique()
-    colors = {h:sns.color_palette()[i] for i, h in enumerate(hues)}
+    colors = {h: sns.color_palette()[i] for i, h in enumerate(hues)}
     ax = None
     for h, s in itertools.product(hues, styles):
         idx = (data[hue] == h) & (data[style] == s)
         tmp = data[idx]
-        ax = sns.regplot(data=tmp, x=x, y=y, ax=ax, marker=markers[s], color = colors[h], line_kws={'ls':lines[s]})
-    title_proxy = Rectangle((0,0), 0, 0, color='w')
+        ax = sns.regplot(data=tmp, x=x, y=y, ax=ax, marker=markers[s], color=colors[h], line_kws={'ls': lines[s]})
+    title_proxy = Rectangle((0, 0), 0, 0, color='w')
     handles = [title_proxy] + ax.lines[0::2] + [title_proxy, plt.Line2D([0], [0], color='black', ls='-'), plt.Line2D([0], [0], color='black', ls='--')]
     labels = ['dataset'] + hues.tolist() + ["type"] + styles.tolist()
     plt.xlim([-0.1, 2.1])
@@ -215,8 +215,8 @@ def main():
         grid.map_dataframe(sns.lineplot, "epoch", 'nat_prec1', hue='dataset',
                            style='type', style_order=['rob', 'st'])
         lgd = grid.axes[0, 2].legend(handles=grid._legend_data.values(), labels=grid._legend_data.keys(),
-                               loc='center', bbox_to_anchor=(1.25, 0.5), facecolor='white',
-                               edgecolor='white')
+                                     loc='center', bbox_to_anchor=(1.25, 0.5), facecolor='white',
+                                     edgecolor='white')
         plt.show()
         grid.savefig(f'results/dynamic_comparison_{args.dataset}.pdf', bbox_extra_artists=(lgd,), bbox_inches='tight')
 
@@ -239,10 +239,23 @@ def main():
         seed_avg = tmp.groupby(['dataset', 'shot', 'mode', 'type']).mean()
         seed_std = tmp.groupby(['dataset', 'shot', 'mode', 'type']).std()
 
+        avg_table, std_table = seed_avg['nat_prec1'], seed_std['nat_prec1']
+        table = pd.concat((avg_table, std_table), axis=1)
+        table.columns = ['avg', 'std']
+        str_template = "{:.2f} $\\pm$ {:.2f}"
+        table['nat_prec1'] = table.apply(lambda x: str_template.format(x['avg'], x['std']), axis=1)
+        table = table['nat_prec1'].reset_index()
+        pivot = pd.pivot_table(table, index=['shot', 'mode', 'type'], columns=['dataset'],
+                               values='nat_prec1', aggfunc=lambda x: '.'.join(x))
+        pivot.to_latex(f"results/comparison_mode_few_{args.dataset}.tex",
+                       float_format="%.2f",
+                       escape=False)
+
         seed_avg = seed_avg.reset_index()
         seed_avg['shot'] = seed_avg['shot'].apply(lambda x: int(x))
         ax, lgd = multireg(seed_avg, y='nat_prec1', x='mode', hue='dataset', style='type')
-        plt.savefig(f"results/comparison_mode_few_{args.dataset}.pdf", bbox_extra_artists=(lgd,), bbox_inches='tight')
+        plt.savefig(f"results/comparison_mode_few_{args.dataset}.pdf",
+                    bbox_extra_artists=(lgd,), bbox_inches='tight')
 
     #     from IPython import embed
     #     embed()
@@ -268,5 +281,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
