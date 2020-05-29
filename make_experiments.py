@@ -31,6 +31,7 @@ parser.add_argument('--temp', type=float, default=100., help='temperature')
 parser.add_argument('--norm', type=bool, default=False, help='norm of weights')
 parser.add_argument('--few-shot', type=bool, default=False, help='results on few shot')
 parser.add_argument('--compare-dyn', type=bool, default=False, help='results on comparison rob st')
+parser.add_argument('--simple', type=bool, default=False, help='Simple datasets')
 
 
 args = parser.parse_args()
@@ -79,11 +80,12 @@ def get_type(name):
         return 'standard'
 
 
-def load(fol, shot=False):
+def load(fol, shot=False, simple=False):
+    idx_mode = 2 if simple else 1
     dfs = readers.CollectionReader(fol)
     logs = dfs.df('logs')
     tmp = logs['exp_id'].apply(lambda x: x.split('_'))
-    tr_dt, mode = tmp.apply(lambda x: x[0]), tmp.apply(lambda x: x[1])
+    tr_dt, mode = tmp.apply(lambda x: x[0]), tmp.apply(lambda x: x[idx_mode])
     logs['dataset'] = tr_dt
     logs['mode'] = mode
     logs['mode'] = logs['mode'].apply(lambda x: int(x))
@@ -203,11 +205,13 @@ def main():
             h.write(macro)
 
     if args.compare_dyn:
-        subfolders = [f'trasf-{args.dataset}-st-new', f'trasf-{args.dataset}-rob-new']
+        simple = 'simple' if args.simple else 'new'
+        subfolders = [f'trasf-{args.dataset}-st-{simple}', f'trasf-{args.dataset}-rob-{simple}']
         subfolders = [os.path.join(args.results, subfolder) for subfolder in subfolders]
-        logs_st = load(subfolders[0])
-        logs_st = logs_st.groupby('exp_id').apply(filter).reset_index(drop=True)
-        logs_rob = load(subfolders[1])
+        logs_st = load(subfolders[0], simple=args.simple)
+        if not args.simple:
+            logs_st = logs_st.groupby('exp_id').apply(filter).reset_index(drop=True)
+        logs_rob = load(subfolders[1], simple=args.simple)
         logs = concat((logs_st, logs_rob), ['st', 'rob'])
 
         plt.figure()
@@ -218,16 +222,16 @@ def main():
                                      loc='center', bbox_to_anchor=(1.25, 0.5), facecolor='white',
                                      edgecolor='white')
         plt.show()
-        grid.savefig(f'results/dynamic_comparison_{args.dataset}.pdf', bbox_extra_artists=(lgd,), bbox_inches='tight')
+        grid.savefig(f'results/dynamic_comparison_{args.dataset}_{simple}.pdf', bbox_extra_artists=(lgd,), bbox_inches='tight')
 
         plt.figure()
         tmp = logs.groupby(['exp_id', 'type']).max().reset_index()
         sns.lineplot(data=tmp, y='nat_prec1', x='mode', hue='dataset', style='type', markers=True)
         lgd = plt.legend(loc='center', bbox_to_anchor=(1.15, 0.5), facecolor='white', edgecolor='white')
-        plt.savefig(f"results/dynamic_comparison_mode_{args.dataset}.pdf", bbox_extra_artists=(lgd,), bbox_inches='tight')
+        plt.savefig(f"results/dynamic_comparison_mode_{args.dataset}_{simple}.pdf", bbox_extra_artists=(lgd,), bbox_inches='tight')
         tmp = logs.groupby(['dataset', 'mode', 'type']).max().reset_index()
         pivot = pd.pivot_table(tmp, index=['mode', 'type'], columns=['dataset'], values='nat_prec1')
-        pivot.to_latex(f"results/dynamic_comparison_mode_{args.dataset}.tex", float_format="%.2f")
+        pivot.to_latex(f"results/dynamic_comparison_mode_{args.dataset}_{simple}.tex", float_format="%.2f")
 
     if args.few_shot:
         subfolders = [f'trasf-{args.dataset}-st-shot-fast', f'trasf-{args.dataset}-rob-shot-fast']
