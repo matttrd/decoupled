@@ -18,6 +18,7 @@ from matplotlib import rc
 #rc('text', usetex=True)
 import itertools
 from matplotlib.patches import Rectangle
+from IPython import embed
 sns.set_style('darkgrid')
 
 parser = ArgumentParser()
@@ -32,6 +33,7 @@ parser.add_argument('--norm', type=bool, default=False, help='norm of weights')
 parser.add_argument('--few-shot', type=bool, default=False, help='results on few shot')
 parser.add_argument('--compare-dyn', type=bool, default=False, help='results on comparison rob st')
 parser.add_argument('--simple', type=bool, default=False, help='Simple datasets')
+parser.add_argument('--inv', type=bool, default=False, help='plot losses')
 
 
 args = parser.parse_args()
@@ -131,11 +133,17 @@ def concat(dfs, types):
     return pd.concat(dfs)
 
 
+# def filter(x):
+#     if int(x['mode'].unique()) == 0:
+#         return x.iloc[0:-1]
+#     else:
+#         return x
+
 def filter(x):
-    if int(x['mode'].unique()) == 0:
-        return x.iloc[0:-1]
-    else:
-        return x
+    sel = x['time'].diff().apply(lambda x: 0 if x > 0 else 1).cumsum()
+    amax = x.groupby(sel).apply(len).idxmax()
+    x = x[sel == amax]
+    return x
 
 
 def main():
@@ -149,6 +157,25 @@ def main():
 
     # df = pd.DataFrame(columns=['eps', 'snn', 'type'])
     # d = {'eps':[], 'snn':[], 'type':[]}
+    def prepare(vec, type_str):
+        df = pd.DataFrame(vec, columns=['loss'])
+        df['type'] = type_str
+        df['iteration'] = df.index
+        df = df[::-10][::-1]
+        return df
+
+    if args.inv:
+        det = torch.load('results/deterministic_inversion.pt')
+        full_var = torch.load('results/full_variational_inversion.pt')
+        var = torch.load('results/variational_inversion.pt')
+        df = prepare(det, 'deterministic')
+        full_var_df = prepare(full_var, 'variational')
+        var_df = prepare(var, 'variational')
+        df = pd.concat([df, full_var_df, var_df]).reset_index()
+        plt.figure()
+        sns.lineplot(x='iteration', y='loss', hue='type', data=df)
+        plt.savefig(f"results/inv_comparison.pdf", bbox_inches='tight')
+        return
 
     if args.norm:
         dfs = readers.CollectionReader(args.results)
@@ -209,6 +236,8 @@ def main():
         subfolders = [f'trasf-{args.dataset}-st-{simple}', f'trasf-{args.dataset}-rob-{simple}']
         subfolders = [os.path.join(args.results, subfolder) for subfolder in subfolders]
         logs_st = load(subfolders[0], simple=args.simple)
+        from IPython import embed
+        embed()
         if not args.simple:
             logs_st = logs_st.groupby('exp_id').apply(filter).reset_index(drop=True)
         logs_rob = load(subfolders[1], simple=args.simple)
