@@ -15,6 +15,16 @@ from exp_library.datasets import DATASETS
 #                                 model_dataset_from_store
 from cox import readers
 from matplotlib import rc
+SMALL_SIZE = 10
+MEDIUM_SIZE = 14
+BIGGER_SIZE = 16
+
+plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+
 #rc('text', usetex=True)
 import itertools
 from matplotlib.patches import Rectangle
@@ -169,11 +179,21 @@ def main():
         full_var = torch.load('results/full_variational_inversion.pt')
         var = torch.load('results/variational_inversion.pt')
         df = prepare(det, 'deterministic')
-        full_var_df = prepare(full_var, 'variational')
+        full_var_df = prepare(full_var, 'full variational')
         var_df = prepare(var, 'variational')
         df = pd.concat([df, full_var_df, var_df]).reset_index()
         plt.figure()
-        sns.lineplot(x='iteration', y='loss', hue='type', data=df)
+        ax = sns.lineplot(x='iteration', y='loss', hue='type', data=df, linewidth=2)
+        # from IPython import embed
+        # embed()
+        axes = ax.get_lines()
+        c = axes[4]._color
+        width = 0.7
+        plt.axhline(y=det.min(), color=c, linestyle='dashed', linewidth=width)
+        c = axes[6]._color
+        plt.axhline(y=var.min(), color=c, linestyle='dashed', linewidth=width)
+        #ax.set(yscale="log")
+        plt.ylabel(r"$\| f(\hat{x}) - \bar{z}\|_2 $")
         plt.savefig(f"results/inv_comparison.pdf", bbox_inches='tight')
         return
 
@@ -236,8 +256,6 @@ def main():
         subfolders = [f'trasf-{args.dataset}-st-{simple}', f'trasf-{args.dataset}-rob-{simple}']
         subfolders = [os.path.join(args.results, subfolder) for subfolder in subfolders]
         logs_st = load(subfolders[0], simple=args.simple)
-        from IPython import embed
-        embed()
         if not args.simple:
             logs_st = logs_st.groupby('exp_id').apply(filter).reset_index(drop=True)
         logs_rob = load(subfolders[1], simple=args.simple)
