@@ -68,8 +68,8 @@ def compute_self_distances():
         for c1, c2 in combinations(classes, classes):
             rep_1 = d['reps'][d['targs'] == c1].numpy()
             rep_2 = d['reps'][d['targs'] == c2].numpy()
-            distances = np.linalg.norm(rep_1[:, None, ...] - rep_2[None, ...], axis=2)
-            avg_dist += distances.mean()
+            dist = np.linalg.norm(rep_1[:, None, ...] - rep_2[None, ...], axis=2)
+            avg_dist += dist.mean()
             n_comb += 1
         distances[dataset] = avg_dist / n_comb
     torch.save(distances, os.path.join(args.results, 'self_distances.pt'))
