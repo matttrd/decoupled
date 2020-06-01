@@ -195,23 +195,28 @@ def main():
         #ax.set(yscale="log")
         plt.ylabel(r"$\| f(\hat{x}) - \bar{z}\|_2 $")
         plt.savefig(f"results/inv_comparison.pdf", bbox_inches='tight')
-        return
 
     if args.norm:
         dfs = readers.CollectionReader(args.results)
         norms = dfs.df('custom')
-        fig, ax = plt.subplots()
+        #fig, ax = plt.subplots()
         norms['wn'] = norms['weight_norm']
-        for name, group in norms.groupby('exp_id'):
-            group.plot(x='epoch', y='wn', label=name, ax=ax, legend=False)
-        
+        # for name, group in norms.groupby('exp_id'):
+        #     group.plot(x='epoch', y='wn', label=name, ax=ax, legend=False)
+        eps = norms['exp_id'].apply(lambda x: x.split('_')[1])
+        norms['eps'] = eps.apply(float)
+        norms = norms[(norms['eps'] > 0.1) | (norms['eps'] < 0.1)]
+        norms['eps'] = norms['eps'].astype('category')
+        # from IPython import embed
+        # embed()
+        ax = sns.lineplot(data=norms,x='epoch',y='wn', hue='eps', linewidth=2)
         handles, labels = ax.get_legend_handles_labels()
-        labels = list(map(lambda x: x.split('_')[1], labels))
-        labels = list(map(lambda x: r"$\varepsilon =" + x + "$", labels))
-        plt.ylabel(r"$\|w\|_2$")
+        #labels = list(map(lambda x: x.split('_')[1], labels))
+        #labels = list(map(lambda x: r"$\varepsilon =" + x + "$", labels))
+        labels[0] = '$\\varepsilon$'
+        plt.ylabel(r"$\||w\||_2$")
         ax.legend(handles, labels)
-        plt.savefig(os.path.join(args.results, 'norms.pdf'))
-        return
+        plt.savefig(os.path.join(args.results, 'norms.pdf'), bbox_inches='tight')
 
     if args.tsne or args.snn:
         from exp_library.model_utils import model_dataset_from_store
@@ -268,7 +273,7 @@ def main():
         lgd = grid.axes[0, 2].legend(handles=grid._legend_data.values(), labels=grid._legend_data.keys(),
                                      loc='center', bbox_to_anchor=(1.25, 0.5), facecolor='white',
                                      edgecolor='white')
-        plt.show()
+        #plt.show()
         grid.savefig(f'results/dynamic_comparison_{args.dataset}_{simple}.pdf', bbox_extra_artists=(lgd,), bbox_inches='tight')
 
         plt.figure()
@@ -279,6 +284,35 @@ def main():
         tmp = logs.groupby(['dataset', 'mode', 'type']).max().reset_index()
         pivot = pd.pivot_table(tmp, index=['mode', 'type'], columns=['dataset'], values='nat_prec1')
         pivot.to_latex(f"results/dynamic_comparison_mode_{args.dataset}_{simple}.tex", float_format="%.2f")
+
+        plt.figure()
+        tmp = tmp[tmp['mode']==0]
+        rob = tmp[tmp['type']=='rob'].reset_index(drop=True)
+        st = tmp[tmp['type']=='st'].reset_index(drop=True)
+        #gap = ((rob['nat_prec1'] - st['nat_prec1']).abs() / rob['nat_prec1']).reset_index(drop=True)
+        gap = (rob['nat_prec1'] - st['nat_prec1']).abs().reset_index(drop=True)
+        dataset = tmp['dataset'][::2].reset_index(drop=True)
+        df = pd.concat([gap, dataset],axis=1)
+        df = df.rename(columns={'nat_prec1': 'gap'}).sort_values(['gap'], ascending=[True])
+        sns.lineplot(data=df, y='gap', x='dataset', marker="o", sort=False)
+        #plt.ylabel(r'$\dfrac{\| a_{rob} - a_{st}\|}{a_{rob}}$')
+        plt.ylabel(r'$\| a_{rob} - a_{st}\|$')
+        plt.xlabel('')
+        plt.savefig(f"results/accuracy_order_{args.dataset}_{simple}.pdf", bbox_inches='tight')
+
+        similarities = {'dogs':0.619, 'birds': 0.563, 'cars': 0.560, 'aircraft': 0.556, 'flowers': 0.525}
+        sims = np.array(list(similarities.values()))
+        sims.sort()
+        df = df[df['dataset'] != 'indoor']
+        plt.figure()
+        # from IPython import embed
+        # embed()
+        gaps = df['gap'].sort_values()
+        sns.regplot(y=gaps.values, x=sims,  x_ci=None, ci=0, logistic=True)
+        #plt.ylabel(r'$\dfrac{\| a_{rob} - a_{st}\|}{a_{rob}}$')
+        plt.ylabel(r'$\| a_{rob} - a_{st}\|$')
+        plt.xlabel('similarity')
+        plt.savefig(f"results/accuracy_similarity_{args.dataset}_{simple}.pdf", bbox_inches='tight')
 
     if args.few_shot:
         subfolders = [f'trasf-{args.dataset}-st-shot-fast', f'trasf-{args.dataset}-rob-shot-fast']
