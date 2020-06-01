@@ -60,6 +60,7 @@ def compute_self_distances():
     distances = {}
     for file in features_files:
         dataset = file.split('/')[-1].split("_")[2]
+        print(f'Computing distance for dataset {dataset}')
         if dataset == 'imagenet':
             continue
         type_ = file.split("_")[-1].split('.')[0]
@@ -79,7 +80,9 @@ def compute_self_distances():
 def features_dist(feat_1, feat_2):
     dist = 0
     n = 0
-    for f1, f2 in tqdm(product(feat_1, feat_2)):
+    feat_1 = feat_1[0:min(feat_1.shape[0], 1000)]
+    feat_2 = feat_1[0:min(feat_2.shape[0], 1000)]
+    for f1, f2 in tqdm(product(feat_1, feat_2), total=feat_1.shape[0] * feat_2.shape[0]):
         dist += np.linalg.norm(f1 - f2)
         n += 1
     return dist / n
