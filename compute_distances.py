@@ -6,7 +6,8 @@ import os
 import glob2
 from IPython import embed
 import pyemd
-from itertools import combinations
+from itertools import combinations, product
+from tqdm import tqdm
 
 parser = ArgumentParser()
 parser.add_argument('--results', default='results/feat_extr_imagenet/standard/', type=str, help='path of extraction folders')
@@ -65,14 +66,23 @@ def compute_self_distances():
         d = torch.load(file)
         classes = torch.unique(d['targs'])
         avg_dist, n_comb = 0, 0
-        for c1, c2 in combinations(classes, classes):
+        for c1, c2 in combinations(classes.squeeze(), 2):
             rep_1 = d['reps'][d['targs'] == c1].numpy()
             rep_2 = d['reps'][d['targs'] == c2].numpy()
-            dist = np.linalg.norm(rep_1[:, None, ...] - rep_2[None, ...], axis=2)
-            avg_dist += dist.mean()
+            dist = features_dist(rep_1, rep_2)
+            avg_dist += dist
             n_comb += 1
         distances[dataset] = avg_dist / n_comb
     torch.save(distances, os.path.join(args.results, 'self_distances.pt'))
+
+
+def features_dist(feat_1, feat_2):
+    dist = 0
+    n = 0
+    for f1, f2 in tqdm(product(feat_1, feat_2)):
+        dist += np.linalg.norm(f1 - f2)
+        n += 1
+    return dist / n
 
 
 if __name__ == "__main__":
