@@ -6,6 +6,7 @@ import os
 import glob2
 from IPython import embed
 import pyemd
+from itertools import combinations
 
 parser = ArgumentParser()
 parser.add_argument('--results', default='results/feat_extr_imagenet/standard/', type=str, help='path of extraction folders')
@@ -13,7 +14,7 @@ parser.add_argument('--source', default='imagenet', type=str, help='source datas
 
 args = parser.parse_args()
 
-def main():
+def compute_distances():
     features_files = glob2.glob(os.path.join(args.results, 'training_*.pt'))
 
     centroids_dt = {}
@@ -53,5 +54,27 @@ def main():
     torch.save(distances, os.path.join(args.results, 'distances.pt'))
 
 
+def compute_self_distances():
+    features_files = glob2.glob(os.path.join(args.results, 'training_*.pt'))
+    distances = {}
+    for file in features_files:
+        dataset = file.split('/')[-1].split("_")[2]
+        if dataset == 'imagenet':
+            continue
+        type_ = file.split("_")[-1].split('.')[0]
+        d = torch.load(file)
+        classes = torch.unique(d['targs'])
+        avg_dist, n_comb = 0, 0
+        for c1, c2 in combinations(classes, classes):
+            rep_1 = d['reps'][d['targs'] == c1].numpy()
+            rep_2 = d['reps'][d['targs'] == c2].numpy()
+            distances = np.linalg.norm(rep_1[:, None, ...] - rep_2[None, ...], axis=2)
+            avg_dist += distances.mean()
+            n_comb += 1
+        distances[dataset] = avg_dist / n_comb
+    torch.save(distances, os.path.join(args.results, 'self_distances.pt'))
+
+
 if __name__ == "__main__":
-    main()
+    compute_distances()
+    compute_self_distances()
