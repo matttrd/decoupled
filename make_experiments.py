@@ -42,7 +42,7 @@ parser.add_argument('--temp', type=float, default=100., help='temperature')
 parser.add_argument('--norm', type=bool, default=False, help='norm of weights')
 parser.add_argument('--few-shot', type=bool, default=False, help='results on few shot')
 parser.add_argument('--compare-dyn', type=bool, default=False, help='results on comparison rob st')
-parser.add_argument('--simple', type=bool, default=False, help='Simple datasets')
+parser.add_argument('--suffix', type=str, default='simple', help='File name suffix')
 parser.add_argument('--inv', type=bool, default=False, help='plot losses')
 
 
@@ -257,13 +257,13 @@ def main():
             h.write(macro)
 
     if args.compare_dyn:
-        simple = 'simple' if args.simple else 'new'
-        subfolders = [f'trasf-{args.dataset}-st-{simple}', f'trasf-{args.dataset}-rob-{simple}']
+        simple = args.suffix == 'simple'
+        subfolders = [f'trasf-{args.dataset}-st-{args.suffix}', f'trasf-{args.dataset}-rob-{args.suffix}']
         subfolders = [os.path.join(args.results, subfolder) for subfolder in subfolders]
-        logs_st = load(subfolders[0], simple=args.simple)
-        if not args.simple:
+        logs_st = load(subfolders[0], simple=simple)
+        if not args.suffix == 'new':
             logs_st = logs_st.groupby('exp_id').apply(filter).reset_index(drop=True)
-        logs_rob = load(subfolders[1], simple=args.simple)
+        logs_rob = load(subfolders[1], simple=simple)
         logs = concat((logs_st, logs_rob), ['st', 'rob'])
 
         plt.figure()
@@ -274,16 +274,24 @@ def main():
                                      loc='center', bbox_to_anchor=(1.25, 0.5), facecolor='white',
                                      edgecolor='white')
         #plt.show()
-        grid.savefig(f'results/dynamic_comparison_{args.dataset}_{simple}.pdf', bbox_extra_artists=(lgd,), bbox_inches='tight')
+        grid.savefig(f'results/dynamic_comparison_{args.dataset}_{args.suffix}.pdf', bbox_extra_artists=(lgd,), bbox_inches='tight')
 
         plt.figure()
         tmp = logs.groupby(['exp_id', 'type']).max().reset_index()
         sns.lineplot(data=tmp, y='nat_prec1', x='mode', hue='dataset', style='type', markers=True)
         lgd = plt.legend(loc='center', bbox_to_anchor=(1.15, 0.5), facecolor='white', edgecolor='white')
-        plt.savefig(f"results/dynamic_comparison_mode_{args.dataset}_{simple}.pdf", bbox_extra_artists=(lgd,), bbox_inches='tight')
+        plt.savefig(f"results/dynamic_comparison_mode_{args.dataset}_{args.suffix}.pdf", bbox_extra_artists=(lgd,), bbox_inches='tight')
         tmp = logs.groupby(['dataset', 'mode', 'type']).max().reset_index()
         pivot = pd.pivot_table(tmp, index=['mode', 'type'], columns=['dataset'], values='nat_prec1')
-        pivot.to_latex(f"results/dynamic_comparison_mode_{args.dataset}_{simple}.tex", float_format="%.2f")
+        pivot.to_latex(f"results/dynamic_comparison_mode_{args.dataset}_{args.suffix}.tex", float_format="%.2f")
+
+        diff = None
+        for name, group in tmp.groupby('type'):
+            diff = group['nat_prec1'].to_numpy() if diff is None else diff - group['nat_prec1'].to_numpy()
+            group['diff_natprec1'] = diff
+
+        pivot_diff = pd.pivot_table(group, index=['mode'], columns=['dataset'], values='diff_natprec1')
+        pivot_diff.to_latex(f"results/dynamic_comparison_mode_{args.dataset}_{args.suffix}_diff.tex", float_format="%.2f")
 
         plt.figure()
         tmp = tmp[tmp['mode']==0]
@@ -298,7 +306,7 @@ def main():
         #plt.ylabel(r'$\dfrac{\| a_{rob} - a_{st}\|}{a_{rob}}$')
         plt.ylabel(r'$\| a_{rob} - a_{st}\|$')
         plt.xlabel('')
-        plt.savefig(f"results/accuracy_order_{args.dataset}_{simple}.pdf", bbox_inches='tight')
+        plt.savefig(f"results/accuracy_order_{args.dataset}_{args.suffix}.pdf", bbox_inches='tight')
 
         similarities = {'dogs':0.619, 'birds': 0.563, 'cars': 0.560, 'aircraft': 0.556, 'flowers': 0.525}
         sims = np.array(list(similarities.values()))
@@ -312,7 +320,7 @@ def main():
         #plt.ylabel(r'$\dfrac{\| a_{rob} - a_{st}\|}{a_{rob}}$')
         plt.ylabel(r'$\| a_{rob} - a_{st}\|$')
         plt.xlabel('similarity')
-        plt.savefig(f"results/accuracy_similarity_{args.dataset}_{simple}.pdf", bbox_inches='tight')
+        plt.savefig(f"results/accuracy_similarity_{args.dataset}_{args.suffix}.pdf", bbox_inches='tight')
 
     if args.few_shot:
         subfolders = [f'trasf-{args.dataset}-st-shot-fast', f'trasf-{args.dataset}-rob-shot-fast']
