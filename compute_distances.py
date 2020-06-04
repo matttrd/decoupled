@@ -56,7 +56,7 @@ def comput_centroid_distances():
     for k, v in centroids_dt.items():
         if k == 'imagenet':
             continue
-        distances[k] = kl_divergence(ref_cetroid, v).item()  # (centroids_dt[k] - ref_cetroid).norm().item()
+        distances[k] = kl_divergence(v, ref_cetroid).item()  # (centroids_dt[k] - ref_cetroid).norm().item()
 
     s_dist = {k: v for k, v in sorted(distances.items(), key=lambda item: item[1])}
     torch.save(s_dist, os.path.join(args.results, 'kl_distances.pt'))
