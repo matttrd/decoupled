@@ -15,9 +15,9 @@ from exp_library.datasets import DATASETS
 #                                 model_dataset_from_store
 from cox import readers
 from matplotlib import rc
-SMALL_SIZE = 10
-MEDIUM_SIZE = 14
-BIGGER_SIZE = 16
+SMALL_SIZE = 14
+MEDIUM_SIZE = 16
+BIGGER_SIZE = 18
 
 plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
 plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
@@ -294,6 +294,7 @@ def main():
         dataset = tmp['dataset'][::2].reset_index(drop=True)
         df = pd.concat([gap, dataset],axis=1)
         df = df.rename(columns={'nat_prec1': 'gap'}).sort_values(['gap'], ascending=[True])
+        df['dataset'][df['dataset'] == 'caltech-birds'] = 'birds'
         sns.lineplot(data=df, y='gap', x='dataset', marker="o", sort=False)
         #plt.ylabel(r'$\dfrac{\| a_{rob} - a_{st}\|}{a_{rob}}$')
         plt.ylabel(r'$\| a_{rob} - a_{st}\|$')

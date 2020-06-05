@@ -66,28 +66,48 @@ def compute_self_distances():
         type_ = file.split("_")[-1].split('.')[0]
         d = torch.load(file)
         classes = torch.unique(d['targs'])
-        avg_dist, n_comb = 0, 0
-        for c1, c2 in combinations(classes.squeeze(), 2):
-            rep_1 = d['reps'][d['targs'] == c1].numpy()
-            rep_2 = d['reps'][d['targs'] == c2].numpy()
-            dist = features_dist(rep_1, rep_2)
-            avg_dist += dist
-            n_comb += 1
-        distances[dataset] = avg_dist / n_comb
+        centroids = []
+        for cl in classes:
+            centroids.append((d['reps'][d['targs'] == cl]).mean(0, keepdim=True))
+        
+        centroid_vec = torch.cat(centroids, dim=0)
+        dist = (centroid_vec.unsqueeze(1) - centroid_vec.unsqueeze(0)).norm(dim=2)
+        distances[dataset] = dist.mean().item()
     torch.save(distances, os.path.join(args.results, 'self_distances.pt'))
 
+# def compute_self_distances():
+#     features_files = glob2.glob(os.path.join(args.results, 'training_*.pt'))
+#     distances = {}
+#     for file in features_files:
+#         dataset = file.split('/')[-1].split("_")[2]
+#         print(f'Computing distance for dataset {dataset}')
+#         if dataset == 'imagenet':
+#             continue
+#         type_ = file.split("_")[-1].split('.')[0]
+#         d = torch.load(file)
+#         classes = torch.unique(d['targs'])
+#         avg_dist, n_comb = 0, 0
+#         for c1, c2 in combinations(classes.squeeze(), 2):
+#             rep_1 = d['reps'][d['targs'] == c1].numpy()
+#             rep_2 = d['reps'][d['targs'] == c2].numpy()
+#             dist = features_dist(rep_1, rep_2)
+#             avg_dist += dist
+#             n_comb += 1
+#         distances[dataset] = avg_dist / n_comb
+#     torch.save(distances, os.path.join(args.results, 'self_distances.pt'))
 
-def features_dist(feat_1, feat_2):
-    dist = 0
-    n = 0
-    feat_1 = feat_1[0:min(feat_1.shape[0], 1000)]
-    feat_2 = feat_1[0:min(feat_2.shape[0], 1000)]
-    for f1, f2 in tqdm(product(feat_1, feat_2), total=feat_1.shape[0] * feat_2.shape[0]):
-        dist += np.linalg.norm(f1 - f2)
-        n += 1
-    return dist / n
+
+# def features_dist(feat_1, feat_2):
+#     dist = 0
+#     n = 0
+#     feat_1 = feat_1[0:min(feat_1.shape[0], 1000)]
+#     feat_2 = feat_1[0:min(feat_2.shape[0], 1000)]
+#     for f1, f2 in tqdm(product(feat_1, feat_2), total=feat_1.shape[0] * feat_2.shape[0]):
+#         dist += np.linalg.norm(f1 - f2)
+#         n += 1
+#     return dist / n
 
 
 if __name__ == "__main__":
     compute_distances()
-    compute_self_distances()
+    #compute_self_distances()
