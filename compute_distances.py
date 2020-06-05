@@ -15,6 +15,55 @@ parser.add_argument('--source', default='imagenet', type=str, help='source datas
 
 args = parser.parse_args()
 
+
+@torch.no_grad()
+def kl_divergence(p, q):
+    mu0, sigma0 = p
+    mu1, sigma1 = q
+
+    if len(mu0.shape) == 1:
+        mu0, mu1 = mu0[:, None], mu1[:, None]
+
+    diff = mu1 - mu0
+    inv_sigma1 = torch.inverse(sigma1)
+    diff_log_det = torch.logdet(sigma1) - torch.logdet(sigma0)
+    return 0.5 * (torch.trace(inv_sigma1 @ sigma0) + diff.t() @ inv_sigma1 @ diff + diff_log_det - sigma0.shape[0])
+
+
+def comput_centroid_distances():
+    features_files = glob2.glob(os.path.join(args.results, 'training_*.pt'))
+    centroids_dt = {}
+
+    for file in features_files:
+        dataset = file.split('/')[-1].split("_")[2]
+        type_ = file.split("_")[-1].split('.')[0]
+        d = torch.load(file)
+        reps = d['reps']
+
+        max_idx = min(reps.shape[0], 10000)
+        idx = torch.randperm(reps.shape[0])[0:max_idx]
+        reps = reps[idx]
+
+        mu = reps.mean(axis=0)
+        reps = reps - mu
+        cov = reps.t() @ reps / reps.shape[1]
+
+        centroids_dt[dataset] = (mu, cov)
+
+    ref_cetroid, ref_std = centroids_dt[args.source]
+    distances = {}
+
+    for k, (mu, std) in centroids_dt.items():
+        if k == args.source:
+            continue
+        distances[k] = (mu - ref_cetroid).norm().item() #kl_divergence(v, ref_cetroid).item()  
+
+    s_dist = {k: v for k, v in sorted(distances.items(), key=lambda item: item[1])}
+    torch.save(s_dist, os.path.join(args.results, 'kl_distances.pt'))
+    for k, v in s_dist.items():
+        print(k, v)
+
+
 def compute_distances():
     features_files = glob2.glob(os.path.join(args.results, 'training_*.pt'))
 
@@ -39,7 +88,7 @@ def compute_distances():
     source_weights = source_weights.float() / source_weights.sum()
     distances = {}
     for k,v in centroids_dt.items():
-        if k == 'imagenet': 
+        if k == args.source: 
             continue
         target, target_weights = v[0], v[1].float() / v[1].sum()
         f_s, f_t = source.numpy(), target.numpy()
@@ -53,6 +102,9 @@ def compute_distances():
         distances[k] = np.exp(-0.01 * emd)
 
     torch.save(distances, os.path.join(args.results, 'distances.pt'))
+    s_dist = {k: v for k, v in sorted(distances.items(), key=lambda item: item[1])}
+    for k, v in s_dist.items():
+        print(k, v)
 
 
 def compute_self_distances():
@@ -109,5 +161,8 @@ def compute_self_distances():
 
 
 if __name__ == "__main__":
+    print("Computing centroid distances")
+    comput_centroid_distances()
+    print("Computing emd distances")
     compute_distances()
     #compute_self_distances()
