@@ -50,13 +50,13 @@ def comput_centroid_distances():
 
         centroids_dt[dataset] = (mu, cov)
 
-    ref_cetroid = centroids_dt['imagenet']
+    ref_cetroid, ref_std = centroids_dt[args.source]
     distances = {}
 
-    for k, v in centroids_dt.items():
-        if k == 'imagenet':
+    for k, (mu, std) in centroids_dt.items():
+        if k == args.source:
             continue
-        distances[k] = kl_divergence(v, ref_cetroid).item()  # (centroids_dt[k] - ref_cetroid).norm().item()
+        distances[k] = (mu - ref_cetroid).norm().item() #kl_divergence(v, ref_cetroid).item()  
 
     s_dist = {k: v for k, v in sorted(distances.items(), key=lambda item: item[1])}
     torch.save(s_dist, os.path.join(args.results, 'kl_distances.pt'))
@@ -88,7 +88,7 @@ def compute_distances():
     source_weights = source_weights.float() / source_weights.sum()
     distances = {}
     for k,v in centroids_dt.items():
-        if k == 'imagenet': 
+        if k == args.source: 
             continue
         target, target_weights = v[0], v[1].float() / v[1].sum()
         f_s, f_t = source.numpy(), target.numpy()
@@ -102,6 +102,9 @@ def compute_distances():
         distances[k] = np.exp(-0.01 * emd)
 
     torch.save(distances, os.path.join(args.results, 'distances.pt'))
+    s_dist = {k: v for k, v in sorted(distances.items(), key=lambda item: item[1])}
+    for k, v in s_dist.items():
+        print(k, v)
 
 
 def compute_self_distances():
@@ -138,6 +141,8 @@ def features_dist(feat_1, feat_2):
 
 
 if __name__ == "__main__":
+    print("Computing centroid distances")
     comput_centroid_distances()
-    #compute_distances()
+    print("Computing emd distances")
+    compute_distances()
     #compute_self_distances()
