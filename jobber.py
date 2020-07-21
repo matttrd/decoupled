@@ -28,7 +28,8 @@ def runner():
             return
         c = cmds.pop()
         if g is None:
-            c = c + (' -g %d')%(gs[idx%len(gs)])
+            # c = c + (' -g %d')%(gs[idx%len(gs)])
+            c = ('CUDA_VISIBLE_DEVICES=%d ')%(gs[idx%len(gs)]) + c
         p = subprocess.Popen(c, shell=True)
         running[idx] = p
         print('[Launch] ', p, c)
